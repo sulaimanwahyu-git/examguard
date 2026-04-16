@@ -83,6 +83,11 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidLog(request.resource.data);
       allow delete: if isAdmin();
     }
+
+    match /metadata/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     
     // Default deny
     match /{document=**} {

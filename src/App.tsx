@@ -156,6 +156,7 @@ const Navbar = ({ isAdmin, onLogout }: { isAdmin: boolean, onLogout: () => void 
 };
 
 const ADMIN_EMAILS = ['ujianspendapol@gmail.com', 'sulaimanwahyu@gmail.com'];
+const ADMIN_ACCESS_CODE = 'SPENDAPOL2024'; // Kode akses admin untuk mengubah data
 
 // --- Admin Login ---
 
@@ -168,16 +169,26 @@ const AdminLogin = ({ onLogin }: { onLogin: () => void }) => {
     e.preventDefault();
     if (password === 'admin123') {
       localStorage.setItem('admin_token', 'secure_session_active');
+      localStorage.setItem('admin_access_type', 'password'); // Mode baca saja
       try {
         await signInAnonymously(auth);
         onLogin();
       } catch (err: any) {
         console.error("Firebase Anonymous Login failed:", err);
-        // Still allow login to UI, but warn about Firebase
+        onLogin();
+      }
+    } else if (password === ADMIN_ACCESS_CODE) {
+      localStorage.setItem('admin_token', 'secure_session_active');
+      localStorage.setItem('admin_access_type', 'code'); // Mode penuh
+      try {
+        await signInAnonymously(auth);
+        onLogin();
+      } catch (err: any) {
+        console.error("Firebase Anonymous Login failed:", err);
         onLogin();
       }
     } else {
-      setError('Kata sandi salah!');
+      setError('Kata sandi atau Kode Akses salah!');
     }
   };
 
@@ -189,6 +200,7 @@ const AdminLogin = ({ onLogin }: { onLogin: () => void }) => {
       const result = await signInWithPopup(auth, provider);
       if (result.user.email && ADMIN_EMAILS.includes(result.user.email)) {
         localStorage.setItem('admin_token', 'secure_session_active');
+        localStorage.setItem('admin_access_type', 'google');
         onLogin();
       } else {
         await signOut(auth);
@@ -381,9 +393,22 @@ const AdminDashboard = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [pinRequired, setPinRequired] = useState(false);
+  const [pinInput, setPinInput] = useState('');
   const hasAttemptedAuth = useRef(false);
 
   useEffect(() => {
+    // Track connection status
+    const unsubMetadata = onSnapshot(doc(db, 'metadata', 'status'), { includeMetadataChanges: true }, (doc) => {
+      setIsOnline(!doc.metadata.fromCache);
+    }, () => {
+      // Fallback if metadata doc doesn't exist or no permission
+      window.addEventListener('online', () => setIsOnline(true));
+      window.addEventListener('offline', () => setIsOnline(false));
+    });
+
     const checkAuth = async () => {
       if (!auth.currentUser && !hasAttemptedAuth.current) {
         hasAttemptedAuth.current = true;
@@ -401,6 +426,7 @@ const AdminDashboard = () => {
     const qExams = query(collection(db, 'exams'), orderBy('createdAt', 'desc'));
     const unsubExams = onSnapshot(qExams, (snapshot) => {
       setExams(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Exam)));
+      setLastUpdated(new Date());
     }, (error) => {
       console.error("Exams listener error:", error);
     });
@@ -442,6 +468,7 @@ const AdminDashboard = () => {
       unsubGroups();
       unsubSessions();
       unsubLogs();
+      unsubMetadata();
     };
   }, [auth.currentUser]);
 
@@ -517,9 +544,10 @@ const AdminDashboard = () => {
   };
 
   const checkPermission = () => {
-    if (auth.currentUser?.isAnonymous) {
+    const isAdminCodeSession = localStorage.getItem('admin_access_type') === 'code';
+    if (auth.currentUser?.isAnonymous && !isAdminCodeSession) {
       setNotification({ 
-        message: "Akses Terbatas: Silakan masuk dengan Google untuk menambah atau mengubah data.", 
+        message: "Akses Terbatas: Silakan masuk dengan Google atau Kode Akses Admin untuk mengubah data.", 
         type: 'error' 
       });
       return false;
@@ -788,7 +816,7 @@ const AdminDashboard = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      {auth.currentUser?.isAnonymous && (
+      {auth.currentUser?.isAnonymous && localStorage.getItem('admin_access_type') !== 'code' && (
         <div className="mb-6 p-6 bg-amber-50 border-2 border-amber-200 rounded-2xl flex flex-col sm:flex-row items-center gap-4 shadow-sm">
           <div className="bg-amber-100 p-3 rounded-xl text-amber-600">
             <Lock className="w-6 h-6" />
@@ -848,6 +876,18 @@ const AdminDashboard = () => {
       )}
       <div className="flex flex-col items-center gap-8 mb-12">
         <div className="text-center">
+          <div className="flex flex-col items-center gap-1 mb-2">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+              <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">
+                {isOnline ? 'Sistem Terhubung (Real-time)' : 'Koneksi Terputus (Offline)'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[9px] font-bold text-gray-300 uppercase tracking-tighter">
+              <RotateCcw className="w-2 h-2" />
+              Update Terakhir: {format(lastUpdated, 'HH:mm:ss')}
+            </div>
+          </div>
           <h1 className="text-4xl font-black text-gray-900 tracking-tight">Panel Kontrol Admin</h1>
           <p className="text-gray-500 mt-2 font-medium">Kelola ujian, kelompok, dan pantau peserta secara real-time</p>
         </div>
@@ -2008,6 +2048,8 @@ const ExamPlayer = () => {
   const [isLocked, setIsLocked] = useState(false);
   const [isFrozen, setIsFrozen] = useState(false);
   const [freezeTimeLeft, setFreezeTimeLeft] = useState(0);
+  const [pinRequired, setPinRequired] = useState(false);
+  const [pinInput, setPinInput] = useState('');
   const [violationCount, setViolationCount] = useState(0);
   const [lockReason, setLockReason] = useState('');
   const [timeLeft, setTimeLeft] = useState<string>('');
@@ -2071,9 +2113,22 @@ const ExamPlayer = () => {
         timestamp: new Date().toISOString()
       });
 
+      if (newViolationCount >= 6) {
+        setIsLocked(true);
+        setLockReason('Ujian ditutup PERMANEN karena melakukan pelanggaran lebih dari 6 kali.');
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+        return;
+      }
+
       const freezeDuration = (exam.freezeDuration || 15) * newViolationCount;
       setIsFrozen(true);
       setFreezeTimeLeft(freezeDuration);
+      
+      if (newViolationCount >= 3) {
+        setPinRequired(true);
+      }
 
       if (document.fullscreenElement) {
         document.exitFullscreen().catch(() => {});
@@ -2321,16 +2376,43 @@ const ExamPlayer = () => {
       }
 
       const startTimeStr = new Date().toISOString();
-      const sessionRef = await addDoc(collection(db, 'exam_sessions'), {
-        examId: id,
-        studentName: studentName.trim(),
-        studentClass: studentClass.trim(),
-        studentAbsen: studentAbsen.trim(),
-        startTime: startTimeStr,
-        status: 'active',
-        lastActive: startTimeStr
-      });
-      setSessionId(sessionRef.id);
+      
+      // Check for existing active session for this student in this exam
+      const qExisting = query(
+        collection(db, 'exam_sessions'), 
+        where('examId', '==', id),
+        where('studentName', '==', studentName.trim()),
+        where('studentClass', '==', studentClass.trim()),
+        where('studentAbsen', '==', studentAbsen.trim()),
+        where('status', '==', 'active')
+      );
+      
+      const existingSnap = await getDocs(qExisting);
+      
+      let currentSessionId: string;
+      
+      if (!existingSnap.empty) {
+        // Use the existing session instead of creating a new one
+        currentSessionId = existingSnap.docs[0].id;
+        // Update lastActive to show they are back
+        await updateDoc(doc(db, 'exam_sessions', currentSessionId), {
+          lastActive: startTimeStr
+        });
+      } else {
+        // Create new session
+        const sessionRef = await addDoc(collection(db, 'exam_sessions'), {
+          examId: id,
+          studentName: studentName.trim(),
+          studentClass: studentClass.trim(),
+          studentAbsen: studentAbsen.trim(),
+          startTime: startTimeStr,
+          status: 'active',
+          lastActive: startTimeStr
+        });
+        currentSessionId = sessionRef.id;
+      }
+      
+      setSessionId(currentSessionId);
       setSessionStartTime(startTimeStr);
 
       if (containerRef.current || document.documentElement) {
@@ -2364,6 +2446,15 @@ const ExamPlayer = () => {
   };
 
   const resumeExam = async () => {
+    if (pinRequired) {
+      if (pinInput !== exam?.accessCode) {
+        setPlayerError("PIN Masuk salah! Gunakan kode akses ujian sebagai PIN.");
+        return;
+      }
+      setPinRequired(false);
+      setPinInput('');
+    }
+
     try {
       // Resume AudioContext on user gesture
       if (audioContext && audioContext.state === 'suspended') {
@@ -2655,23 +2746,43 @@ const ExamPlayer = () => {
                   <AlertTriangle className="text-white w-10 h-10" />
                 </div>
                 <h2 className="text-3xl font-bold text-white mb-2">SISTEM TERKUNCI</h2>
-                <p className="text-red-400 font-bold mb-8 uppercase tracking-widest">
+                <p className="text-red-400 font-bold mb-6 uppercase tracking-widest">
                   Pelanggaran Terdeteksi (#{violationCount})
                 </p>
                 
-                <div className="bg-white/10 rounded-2xl p-8 mb-8">
-                  <p className="text-gray-300 text-sm mb-2">Halaman akan terbuka kembali dalam:</p>
+                <div className="bg-white/10 rounded-2xl p-6 mb-6">
+                  <p className="text-gray-300 text-sm mb-2">
+                    {violationCount >= 3 
+                      ? "Anda telah melakukan banyak pelanggaran. Masukkan PIN untuk melanjutkan."
+                      : "Halaman akan terbuka kembali dalam:"}
+                  </p>
                   <span className="text-6xl font-mono font-black text-white">{freezeTimeLeft}s</span>
                 </div>
 
-                {freezeTimeLeft === 0 && (
-                  <button 
-                    onClick={resumeExam}
-                    className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-900/20"
-                  >
-                    Lanjutkan Ujian
-                  </button>
+                {violationCount >= 3 && (
+                  <div className="mb-6 text-left">
+                    <label className="block text-[10px] font-black text-red-400 uppercase tracking-widest mb-2">Masukkan PIN (Kode Akses Ujian)</label>
+                    <input 
+                      type="text"
+                      value={pinInput}
+                      onChange={(e) => setPinInput(e.target.value)}
+                      placeholder="Masukkan PIN..."
+                      className="w-full px-5 py-3 bg-white/5 border-2 border-white/20 rounded-xl font-bold text-center text-white focus:border-indigo-500 outline-none transition-all"
+                    />
+                  </div>
                 )}
+
+                <button 
+                  onClick={resumeExam}
+                  disabled={freezeTimeLeft > 0}
+                  className={`w-full py-4 rounded-xl font-bold text-lg transition-all shadow-xl ${
+                    freezeTimeLeft > 0 
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed' 
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-900/20'
+                  }`}
+                >
+                  {freezeTimeLeft > 0 ? 'Menunggu...' : (violationCount >= 3 ? 'Verifikasi PIN & Lanjutkan' : 'Lanjutkan Ujian')}
+                </button>
                 
                 <p className="mt-6 text-gray-500 text-xs">
                   Setiap pelanggaran akan menambah durasi kunci secara eksponensial.
