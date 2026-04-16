@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "Exam": {
+      "title": "Exam",
+      "description": "Represents an exam created by the admin.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the exam" },
+        "url": { "type": "string", "description": "URL of the exam content (e.g. Google Form)" },
+        "startTime": { "type": "string", "format": "date-time", "description": "ISO timestamp of when the exam starts" },
+        "endTime": { "type": "string", "format": "date-time", "description": "ISO timestamp of when the exam ends" },
+        "duration": { "type": "number", "description": "Duration of the exam in minutes" },
+        "accessCode": { "type": "string", "description": "Code required to enter the exam" },
+        "exitCode": { "type": "string", "description": "Code required to exit the exam" },
+        "info": { "type": "string", "description": "Additional information about the exam" },
+        "rules": { "type": "string", "description": "Specific rules for this exam" },
+        "freezeDuration": { "type": "number", "description": "Duration in seconds to freeze the screen on violation" },
+        "isActive": { "type": "boolean", "description": "Whether the exam is currently active" },
+        "groupId": { "type": "string", "description": "ID of the group this exam belongs to" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "ISO timestamp of when the exam was created" }
+      },
+      "required": ["title", "url", "startTime", "endTime", "accessCode", "createdAt"]
+    },
+    "Group": {
+      "title": "Group",
+      "description": "Represents a group of exams (e.g. a class or subject).",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the group" },
+        "rules": { "type": "string", "description": "Rules shared by all exams in this group" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "ISO timestamp of when the group was created" },
+        "isActive": { "type": "boolean", "description": "Whether the group is currently active" }
+      },
+      "required": ["name", "createdAt"]
+    },
+    "ExamSession": {
+      "title": "ExamSession",
+      "description": "Represents a student's attempt at an exam.",
+      "type": "object",
+      "properties": {
+        "examId": { "type": "string", "description": "ID of the exam being taken" },
+        "studentName": { "type": "string", "description": "Name of the student" },
+        "studentClass": { "type": "string", "description": "Class of the student" },
+        "studentAbsen": { "type": "string", "description": "Attendance number of the student" },
+        "startTime": { "type": "string", "format": "date-time", "description": "ISO timestamp of when the session started" },
+        "endTime": { "type": "string", "format": "date-time", "description": "ISO timestamp of when the session ended" },
+        "status": { "type": "string", "enum": ["active", "finished"], "description": "Current status of the session" },
+        "lastActive": { "type": "string", "format": "date-time", "description": "ISO timestamp of the last activity" }
+      },
+      "required": ["examId", "studentName", "studentClass", "studentAbsen", "startTime", "status", "lastActive"]
+    },
+    "CheatLog": {
+      "title": "CheatLog",
+      "description": "Represents a violation detected during an exam.",
+      "type": "object",
+      "properties": {
+        "examId": { "type": "string", "description": "ID of the exam where the violation occurred" },
+        "studentName": { "type": "string", "description": "Name of the student who committed the violation" },
+        "type": { "type": "string", "description": "Type of violation (e.g. Tab Switch, Screen Resize)" },
+        "details": { "type": "string", "description": "Details about the violation" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "ISO timestamp of when the violation occurred" }
+      },
+      "required": ["examId", "studentName", "type", "timestamp"]
+    }
+  },
+  "firestore": {
+    "exams": { "schema": "Exam", "description": "Collection of exams" },
+    "groups": { "schema": "Group", "description": "Collection of exam groups" },
+    "exam_sessions": { "schema": "ExamSession", "description": "Collection of student exam sessions" },
+    "cheat_logs": { "schema": "CheatLog", "description": "Collection of cheat logs/violations" }
+  }
+}

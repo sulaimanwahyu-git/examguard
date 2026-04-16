@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: exams
+    // Fields: title, url, startTime, endTime, duration, accessCode, exitCode, info, rules, freezeDuration, isActive, groupId, createdAt
+    //
+    // Collection: groups
+    // Fields: name, rules, createdAt, isActive
+    //
+    // Collection: exam_sessions
+    // Fields: examId, studentName, studentClass, studentAbsen, startTime, endTime, status, lastActive
+    //
+    // Collection: cheat_logs
+    // Fields: examId, studentName, type, details, timestamp
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (
+          (request.auth.token.email == "sulaimanwahyu@gmail.com" && request.auth.token.email_verified == true) ||
+          (request.auth.token.email == "ujianspendapol@gmail.com" && request.auth.token.email_verified == true)
+        );
+    }
+
+    // Validation Helpers
+    function isValidString(val, maxLen) {
+      return val is string && val.size() > 0 && val.size() <= maxLen;
+    }
+
+    function isValidSession(data) {
+      return data.keys().hasAll(['examId', 'studentName', 'studentClass', 'studentAbsen', 'startTime', 'status', 'lastActive']) &&
+             isValidString(data.studentName, 100) &&
+             isValidString(data.studentClass, 50) &&
+             isValidString(data.studentAbsen, 20) &&
+             data.status in ['active', 'finished'];
+    }
+
+    function isValidSessionUpdate(data) {
+      // Only allow updating specific fields
+      return data.diff(resource.data).affectedKeys().hasAny(['lastActive', 'status', 'endTime']) &&
+             data.diff(resource.data).affectedKeys().hasOnly(['lastActive', 'status', 'endTime']) &&
+             (data.status == 'finished' || data.status == resource.data.status);
+    }
+
+    function isValidLog(data) {
+      return data.keys().hasAll(['examId', 'studentName', 'type', 'timestamp']) &&
+             isValidString(data.studentName, 100) &&
+             isValidString(data.type, 50) &&
+             isValidString(data.details, 1000);
+    }
+
+    // Rules
+    
+    match /exams/{examId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /groups/{groupId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /exam_sessions/{sessionId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && isValidSession(request.resource.data);
+      allow update: if isAuthenticated() && isValidSessionUpdate(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /cheat_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && isValidLog(request.resource.data);
+      allow delete: if isAdmin();
+    }
+    
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

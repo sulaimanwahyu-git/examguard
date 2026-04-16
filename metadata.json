@@ -1,0 +1,5 @@
+{
+  "name": "ExamGuard - Browser Ujian Anti Curang",
+  "description": "Browser ujian aman dengan fitur anti-contek, dukungan PWA, dan dashboard admin untuk mengelola ujian.",
+  "requestFramePermissions": []
+}
