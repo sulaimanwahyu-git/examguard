@@ -2385,16 +2385,19 @@ const ExamPlayer = () => {
     if (!exam) return;
     if (!studentName.trim()) {
       setPlayerError("Masukkan nama lengkap Anda.");
+      setIsStarting(false);
       return;
     }
 
     if (!studentClass.trim()) {
       setPlayerError("Masukkan kelas Anda.");
+      setIsStarting(false);
       return;
     }
 
     if (!studentAbsen.trim()) {
       setPlayerError("Masukkan nomor absen Anda.");
+      setIsStarting(false);
       return;
     }
     
@@ -2404,15 +2407,29 @@ const ExamPlayer = () => {
     
     if (!isWithinInterval(now, { start, end })) {
       setPlayerError("Ujian saat ini tidak aktif.");
+      setIsStarting(false);
       return;
     }
 
     if (code !== exam.accessCode) {
       setPlayerError("Kode masuk tidak valid.");
+      setIsStarting(false);
       return;
     }
 
     try {
+      // Fullscreen handling IMMEDIATELY after user gesture
+      const target = document.documentElement;
+      try {
+        if (target.requestFullscreen) {
+          target.requestFullscreen().catch(() => {});
+        } else if ((target as any).webkitRequestFullscreen) {
+          (target as any).webkitRequestFullscreen();
+        }
+      } catch (fsErr) {
+        console.warn("Initial fullscreen failed:", fsErr);
+      }
+
       // Initialize AudioContext on user gesture for iOS
       const AudioCtxClass = (window as any).AudioContext || (window as any).webkitAudioContext;
       if (AudioCtxClass) {
@@ -2430,34 +2447,38 @@ const ExamPlayer = () => {
           } else {
             setPlayerError("Gagal menghubungkan ke sistem keamanan. Silakan coba lagi nanti.");
           }
+          setIsStarting(false);
           return;
         }
       }
 
       const startTimeStr = new Date().toISOString();
+      let currentSessionId: string | null = null;
       
-      // Check for existing active session for this student in this exam
-      const qExisting = query(
-        collection(db, 'exam_sessions'), 
-        where('examId', '==', id),
-        where('studentName', '==', studentName.trim()),
-        where('studentClass', '==', studentClass.trim()),
-        where('studentAbsen', '==', studentAbsen.trim()),
-        where('status', '==', 'active')
-      );
+      // Attempt to find existing session (Safe mode - won't block if index missing)
+      try {
+        const qExisting = query(
+          collection(db, 'exam_sessions'), 
+          where('examId', '==', id),
+          where('studentName', '==', studentName.trim()),
+          where('studentClass', '==', studentClass.trim()),
+          where('studentAbsen', '==', studentAbsen.trim()),
+          where('status', '==', 'active'),
+          limit(1)
+        );
+        
+        const existingSnap = await getDocs(qExisting);
+        if (!existingSnap.empty) {
+          currentSessionId = existingSnap.docs[0].id;
+          await updateDoc(doc(db, 'exam_sessions', currentSessionId), {
+            lastActive: startTimeStr
+          });
+        }
+      } catch (e) {
+        console.warn("Duplicate check failed (probably missing index), creating new session instead.", e);
+      }
       
-      const existingSnap = await getDocs(qExisting);
-      
-      let currentSessionId: string;
-      
-      if (!existingSnap.empty) {
-        // Use the existing session instead of creating a new one
-        currentSessionId = existingSnap.docs[0].id;
-        // Update lastActive to show they are back
-        await updateDoc(doc(db, 'exam_sessions', currentSessionId), {
-          lastActive: startTimeStr
-        });
-      } else {
+      if (!currentSessionId) {
         // Create new session
         const sessionRef = await addDoc(collection(db, 'exam_sessions'), {
           examId: id,
@@ -2474,44 +2495,13 @@ const ExamPlayer = () => {
       setSessionId(currentSessionId);
       setSessionStartTime(startTimeStr);
 
-      // Fullscreen handling for mobile resilience
-      const requestFS = async () => {
-        if (containerRef.current || document.documentElement) {
-          const target = document.documentElement;
-          try {
-            if (target.requestFullscreen) {
-              await target.requestFullscreen();
-            } else if ((target as any).webkitRequestFullscreen) {
-              await (target as any).webkitRequestFullscreen();
-            } else if ((target as any).msRequestFullscreen) {
-              await (target as any).msRequestFullscreen();
-            }
-          } catch (fsErr) {
-            console.warn("Fullscreen failed:", fsErr);
-            // On mobile, we avoid throwing an error if fullscreen fails
-            // Browser security often blocks it on mobile if not "pure enough" user gesture
-            if (!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-              // Throw for desktop as it's more stable there
-              // throw new Error("Fullscreen required"); 
-              // Actually, better to just log and continue to ensure 300 users can enter
-            }
-          }
-        }
-      };
-
-      await requestFS();
-
       setLastActionTime(Date.now());
       setIsStarted(true);
       setIsFrozen(false);
       setFreezeTimeLeft(0);
     } catch (err: any) {
-      if (err.message === "Fullscreen required") {
-        setPlayerError("Mode layar penuh diperlukan untuk memulai ujian.");
-      } else {
-        handleFirestoreError(err, OperationType.CREATE, 'exam_sessions');
-        setPlayerError("Gagal memulai ujian. Pastikan koneksi internet stabil.");
-      }
+      console.error("Critical Start Error:", err);
+      setPlayerError("Gagal memulai ujian. Pastikan koneksi internet stabil.");
     } finally {
       setIsStarting(false);
     }
