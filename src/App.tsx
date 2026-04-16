@@ -388,6 +388,9 @@ const AdminDashboard = () => {
   const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
   
   const [participantsSearchTerm, setParticipantsSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [participantNameFilter, setParticipantNameFilter] = useState('');
+  const [participantClassFilter, setParticipantClassFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [violationFilter, setViolationFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -398,6 +401,13 @@ const AdminDashboard = () => {
   const [pinRequired, setPinRequired] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const hasAttemptedAuth = useRef(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(participantsSearchTerm);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [participantsSearchTerm]);
 
   useEffect(() => {
     // Track connection status
@@ -493,11 +503,20 @@ const AdminDashboard = () => {
       const exam = examsMap.get(session.examId);
       const matchesGroup = selectedParticipantGroupId === 'all' || exam?.groupId === selectedParticipantGroupId;
       
-      const searchLower = participantsSearchTerm.toLowerCase();
-      const matchesSearch = session.studentName.toLowerCase().includes(searchLower) ||
+      const searchLower = debouncedSearchTerm.toLowerCase();
+      const matchesSearch = !debouncedSearchTerm || 
+                           session.studentName.toLowerCase().includes(searchLower) ||
                            session.studentClass.toLowerCase().includes(searchLower) ||
                            (exam?.title || '').toLowerCase().includes(searchLower);
       
+      const nameFilterLower = participantNameFilter.toLowerCase();
+      const matchesName = !participantNameFilter || session.studentName.toLowerCase().includes(nameFilterLower);
+      
+      const classFilterLower = participantClassFilter.toLowerCase();
+      const matchesClass = !participantClassFilter || 
+                          session.studentClass.toLowerCase().includes(classFilterLower) ||
+                          session.studentAbsen.toLowerCase().includes(classFilterLower);
+
       const matchesStatus = statusFilter === 'all' || session.status === statusFilter;
       
       const sessionLogs = logsBySession.get(`${session.examId}_${session.studentName}`) || [];
@@ -505,9 +524,9 @@ const AdminDashboard = () => {
                               (violationFilter === 'none' && sessionLogs.length === 0) ||
                               (violationFilter === 'any' && sessionLogs.length > 0);
       
-      return matchesGroup && matchesSearch && matchesStatus && matchesViolation;
+      return matchesGroup && matchesSearch && matchesName && matchesClass && matchesStatus && matchesViolation;
     });
-  }, [sessions, selectedParticipantGroupId, participantsSearchTerm, examsMap, statusFilter, violationFilter, logsBySession]);
+  }, [sessions, selectedParticipantGroupId, participantsSearchTerm, participantNameFilter, participantClassFilter, examsMap, statusFilter, violationFilter, logsBySession]);
 
   const totalPages = Math.ceil(filteredSessions.length / itemsPerPage);
   const paginatedSessions = useMemo(() => {
@@ -517,7 +536,7 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedParticipantGroupId, participantsSearchTerm, statusFilter, violationFilter]);
+  }, [selectedParticipantGroupId, debouncedSearchTerm, participantNameFilter, participantClassFilter, statusFilter, violationFilter]);
 
   const optimizeUrl = (url: string) => {
     let cleanUrl = url.trim();
@@ -1341,18 +1360,38 @@ const AdminDashboard = () => {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="relative flex-1">
+            <div className="flex flex-col lg:flex-row gap-4">
+              <div className="relative flex-[2]">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
                 <input 
                   type="text"
-                  placeholder="Cari nama siswa, kelas, atau judul ujian..."
-                  className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  placeholder="Cari nama, kelas, atau judul ujian..."
+                  className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm"
                   value={participantsSearchTerm}
                   onChange={e => setParticipantsSearchTerm(e.target.value)}
                 />
               </div>
-              <div className="flex gap-2">
+              <div className="relative flex-1">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <input 
+                  type="text"
+                  placeholder="Nama Siswa..."
+                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-xs"
+                  value={participantNameFilter}
+                  onChange={e => setParticipantNameFilter(e.target.value)}
+                />
+              </div>
+              <div className="relative flex-1">
+                <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <input 
+                  type="text"
+                  placeholder="Kelas / No Absen..."
+                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-xs"
+                  value={participantClassFilter}
+                  onChange={e => setParticipantClassFilter(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-2 shrink-0">
                 <select 
                   className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-600 outline-none focus:ring-2 focus:ring-indigo-500"
                   value={statusFilter}
@@ -1371,6 +1410,21 @@ const AdminDashboard = () => {
                   <option value="none">TANPA PELANGGARAN</option>
                   <option value="any">ADA PELANGGARAN</option>
                 </select>
+                {(participantsSearchTerm || participantNameFilter || participantClassFilter || statusFilter !== 'all' || violationFilter !== 'all') && (
+                  <button 
+                    onClick={() => {
+                      setParticipantsSearchTerm('');
+                      setParticipantNameFilter('');
+                      setParticipantClassFilter('');
+                      setStatusFilter('all');
+                      setViolationFilter('all');
+                    }}
+                    className="p-3 text-red-500 hover:bg-red-50 rounded-xl transition-all border border-red-100"
+                    title="Bersihkan Filter"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -2047,6 +2101,7 @@ const ExamPlayer = () => {
   const [isStarted, setIsStarted] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [isFrozen, setIsFrozen] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [freezeTimeLeft, setFreezeTimeLeft] = useState(0);
   const [pinRequired, setPinRequired] = useState(false);
   const [pinInput, setPinInput] = useState('');
@@ -2323,6 +2378,10 @@ const ExamPlayer = () => {
   }, [sessionId, isStarted, isLocked]);
 
   const startExam = async () => {
+    if (isStarting) return;
+    setIsStarting(true);
+    setPlayerError(null);
+    
     if (!exam) return;
     if (!studentName.trim()) {
       setPlayerError("Masukkan nama lengkap Anda.");
@@ -2415,21 +2474,32 @@ const ExamPlayer = () => {
       setSessionId(currentSessionId);
       setSessionStartTime(startTimeStr);
 
-      if (containerRef.current || document.documentElement) {
-        const target = document.documentElement;
-        try {
-          if (target.requestFullscreen) {
-            await target.requestFullscreen();
-          } else if ((target as any).webkitRequestFullscreen) {
-            await (target as any).webkitRequestFullscreen();
-          }
-        } catch (fsErr) {
-          console.warn("Fullscreen failed:", fsErr);
-          if (!isIOS) {
-            throw new Error("Fullscreen required");
+      // Fullscreen handling for mobile resilience
+      const requestFS = async () => {
+        if (containerRef.current || document.documentElement) {
+          const target = document.documentElement;
+          try {
+            if (target.requestFullscreen) {
+              await target.requestFullscreen();
+            } else if ((target as any).webkitRequestFullscreen) {
+              await (target as any).webkitRequestFullscreen();
+            } else if ((target as any).msRequestFullscreen) {
+              await (target as any).msRequestFullscreen();
+            }
+          } catch (fsErr) {
+            console.warn("Fullscreen failed:", fsErr);
+            // On mobile, we avoid throwing an error if fullscreen fails
+            // Browser security often blocks it on mobile if not "pure enough" user gesture
+            if (!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+              // Throw for desktop as it's more stable there
+              // throw new Error("Fullscreen required"); 
+              // Actually, better to just log and continue to ensure 300 users can enter
+            }
           }
         }
-      }
+      };
+
+      await requestFS();
 
       setLastActionTime(Date.now());
       setIsStarted(true);
@@ -2442,6 +2512,8 @@ const ExamPlayer = () => {
         handleFirestoreError(err, OperationType.CREATE, 'exam_sessions');
         setPlayerError("Gagal memulai ujian. Pastikan koneksi internet stabil.");
       }
+    } finally {
+      setIsStarting(false);
     }
   };
 
@@ -2647,9 +2719,17 @@ const ExamPlayer = () => {
 
             <button 
               onClick={startExam}
-              className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+              disabled={isStarting}
+              className={`w-full py-4 text-white rounded-xl font-bold text-lg transition-all shadow-lg ${
+                isStarting ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
+              }`}
             >
-              Mulai Ujian
+              {isStarting ? (
+                <div className="flex items-center justify-center gap-2">
+                  <RotateCcw className="w-5 h-5 animate-spin" />
+                  <span>Menyiapkan Ujian...</span>
+                </div>
+              ) : 'Mulai Ujian'}
             </button>
           </div>
           <div className="mt-8 text-center">
