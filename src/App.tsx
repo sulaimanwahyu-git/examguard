@@ -2111,6 +2111,7 @@ const ExamPlayer = () => {
   const [showTimeWarning, setShowTimeWarning] = useState<number | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionStartTime, setSessionStartTime] = useState<string | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [lastActionTime, setLastActionTime] = useState(0);
@@ -2160,17 +2161,35 @@ const ExamPlayer = () => {
         }
       }
 
-      await addDoc(collection(db, 'cheat_logs'), {
+      const logData: any = {
         examId: id,
         studentName: studentName || 'Siswa Tanpa Nama',
         type,
         details: `${details} (Pelanggaran ke-${newViolationCount})`,
         timestamp: new Date().toISOString()
-      });
+      };
+
+      if (sessionId) {
+        logData.sessionId = sessionId;
+        // Update session violation count
+        updateDoc(doc(db, 'exam_sessions', sessionId), {
+          violationCount: newViolationCount,
+          lastActive: new Date().toISOString()
+        }).catch(e => console.error("Failed to update session violation count", e));
+      }
+
+      await addDoc(collection(db, 'cheat_logs'), logData);
 
       if (newViolationCount >= 6) {
         setIsLocked(true);
-        setLockReason('Ujian ditutup PERMANEN karena melakukan pelanggaran lebih dari 6 kali.');
+        const reason = 'Ujian ditutup PERMANEN karena melakukan pelanggaran lebih dari 6 kali.';
+        setLockReason(reason);
+        if (sessionId) {
+          updateDoc(doc(db, 'exam_sessions', sessionId), {
+            status: 'locked',
+            lockReason: reason
+          }).catch(e => console.error("Failed to lock session in DB"));
+        }
         if (document.fullscreenElement) {
           document.exitFullscreen().catch(() => {});
         }
@@ -2193,6 +2212,29 @@ const ExamPlayer = () => {
       console.error("Gagal mencatat pelanggaran", error);
     }
   }, [exam, isFrozen, isLocked, id, lastActionTime, violationCount, audioContext, studentName]);
+
+  useEffect(() => {
+    // Session Recovery
+    if (!id) return;
+    const savedSession = localStorage.getItem(`session_${id}`);
+    if (savedSession) {
+      try {
+        const data = JSON.parse(savedSession);
+        setStudentName(data.name || '');
+        setStudentClass(data.class || '');
+        setStudentAbsen(data.absen || '');
+      } catch (e) {
+        console.error("Failed to parse saved session", e);
+      }
+    }
+    setIsInitialized(true);
+  }, [id]);
+
+  const retrySession = () => {
+    if (studentName && studentClass && studentAbsen) {
+      startExam();
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -2361,6 +2403,32 @@ const ExamPlayer = () => {
     }, [isFrozen, freezeTimeLeft]);
 
   useEffect(() => {
+    if (!sessionId) return;
+    const unsub = onSnapshot(doc(db, 'exam_sessions', sessionId), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.status === 'locked') {
+          setIsLocked(true);
+          setLockReason(data.lockReason || 'Ujian dikunci oleh administrator.');
+        } else if (data.status === 'finished') {
+          // If admin marks as finished or they finish elsewhere, kick them out
+          navigate('/');
+          localStorage.removeItem(`session_${id}`);
+        } else if (data.status === 'active' && isLocked) {
+          // Admin unlocked them
+          setIsLocked(false);
+          setViolationCount(data.violationCount || 0);
+        }
+        
+        if (data.violationCount !== undefined) {
+          setViolationCount(data.violationCount);
+        }
+      }
+    });
+    return () => unsub();
+  }, [sessionId, isLocked, navigate, id]);
+
+  useEffect(() => {
     if (!sessionId || !isStarted || isLocked) return;
 
     const interval = setInterval(async () => {
@@ -2382,20 +2450,28 @@ const ExamPlayer = () => {
     setIsStarting(true);
     setPlayerError(null);
     
-    if (!exam) return;
-    if (!studentName.trim()) {
+    if (!exam) {
+      setIsStarting(false);
+      return;
+    }
+
+    const cleanName = studentName.trim().toUpperCase();
+    const cleanClass = studentClass.trim().toUpperCase();
+    const cleanAbsen = studentAbsen.trim().toUpperCase();
+
+    if (!cleanName) {
       setPlayerError("Masukkan nama lengkap Anda.");
       setIsStarting(false);
       return;
     }
 
-    if (!studentClass.trim()) {
+    if (!cleanClass) {
       setPlayerError("Masukkan kelas Anda.");
       setIsStarting(false);
       return;
     }
 
-    if (!studentAbsen.trim()) {
+    if (!cleanAbsen) {
       setPlayerError("Masukkan nomor absen Anda.");
       setIsStarting(false);
       return;
@@ -2440,12 +2516,18 @@ const ExamPlayer = () => {
       // Check if authenticated before creating session
       if (!auth.currentUser) {
         try {
-          await signInAnonymously(auth);
+          // Add a timeout to auth to prevent infinite "starting" state
+          const authPromise = signInAnonymously(auth);
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Auth timeout")), 10000));
+          await Promise.race([authPromise, timeoutPromise]);
         } catch (authErr: any) {
+          console.error("Auth error:", authErr);
           if (authErr.code === 'auth/admin-restricted-operation') {
-            setPlayerError("Sistem tidak dapat memulai ujian karena 'Anonymous Authentication' belum diaktifkan di Firebase Console. Silakan hubungi Administrator.");
+            setPlayerError("Anonymous Authentication belum diaktifkan. Hubungi Admin.");
+          } else if (authErr.message === "Auth timeout" || authErr.code === 'auth/network-request-failed') {
+            setPlayerError("Koneksi internet tidak stabil. Gagal terhubung ke server.");
           } else {
-            setPlayerError("Gagal menghubungkan ke sistem keamanan. Silakan coba lagi nanti.");
+            setPlayerError("Gagal menghubungkan ke sistem keamanan. Periksa internet Anda.");
           }
           setIsStarting(false);
           return;
@@ -2453,55 +2535,64 @@ const ExamPlayer = () => {
       }
 
       const startTimeStr = new Date().toISOString();
-      let currentSessionId: string | null = null;
       
-      // Attempt to find existing session (Safe mode - won't block if index missing)
-      try {
-        const qExisting = query(
-          collection(db, 'exam_sessions'), 
-          where('examId', '==', id),
-          where('studentName', '==', studentName.trim()),
-          where('studentClass', '==', studentClass.trim()),
-          where('studentAbsen', '==', studentAbsen.trim()),
-          where('status', '==', 'active'),
-          limit(1)
-        );
-        
-        const existingSnap = await getDocs(qExisting);
-        if (!existingSnap.empty) {
-          currentSessionId = existingSnap.docs[0].id;
-          await updateDoc(doc(db, 'exam_sessions', currentSessionId), {
-            lastActive: startTimeStr
-          });
+      // CREATE A DETERMINISTIC SESSION ID
+      // This is the "Silver Bullet" to prevent multiple sessions for the same student
+      const rawId = `${id}_${cleanName}_${cleanClass}_${cleanAbsen}`.replace(/\s+/g, '_');
+      const deterministicSessionId = btoa(rawId).replace(/=/g, ''); // Base64 safe ID
+      
+      const sessionRef = doc(db, 'exam_sessions', deterministicSessionId);
+      const sessionSnap = await getDoc(sessionRef);
+      
+      if (sessionSnap.exists()) {
+        const docData = sessionSnap.data();
+        if (docData.status === 'finished') {
+          setPlayerError("Anda sudah menyelesaikan ujian ini.");
+          setIsStarting(false);
+          return;
         }
-      } catch (e) {
-        console.warn("Duplicate check failed (probably missing index), creating new session instead.", e);
-      }
-      
-      if (!currentSessionId) {
-        // Create new session
-        const sessionRef = await addDoc(collection(db, 'exam_sessions'), {
+        
+        // Resume existing session
+        await updateDoc(sessionRef, {
+          lastActive: startTimeStr,
+          status: 'active'
+        });
+      } else {
+        // Create new session with deterministic ID
+        await setDoc(sessionRef, {
           examId: id,
-          studentName: studentName.trim(),
-          studentClass: studentClass.trim(),
-          studentAbsen: studentAbsen.trim(),
+          studentName: cleanName,
+          studentClass: cleanClass,
+          studentAbsen: cleanAbsen,
           startTime: startTimeStr,
           status: 'active',
-          lastActive: startTimeStr
+          lastActive: startTimeStr,
+          violationCount: 0
         });
-        currentSessionId = sessionRef.id;
       }
       
-      setSessionId(currentSessionId);
-      setSessionStartTime(startTimeStr);
+      // Save for recovery
+      localStorage.setItem(`session_${id}`, JSON.stringify({
+        id: deterministicSessionId,
+        name: cleanName,
+        class: cleanClass,
+        absen: cleanAbsen,
+        startTime: startTimeStr
+      }));
 
+      setSessionId(deterministicSessionId);
+      setSessionStartTime(startTimeStr);
       setLastActionTime(Date.now());
       setIsStarted(true);
       setIsFrozen(false);
+      setIsLocked(false);
       setFreezeTimeLeft(0);
+      if (sessionSnap.exists()) {
+        setViolationCount(sessionSnap.data().violationCount || 0);
+      }
     } catch (err: any) {
       console.error("Critical Start Error:", err);
-      setPlayerError("Gagal memulai ujian. Pastikan koneksi internet stabil.");
+      setPlayerError("Gagal memulai ujian. Pastikan koneksi internet stabil (Firestore Error).");
     } finally {
       setIsStarting(false);
     }
@@ -2554,6 +2645,7 @@ const ExamPlayer = () => {
           endTime: new Date().toISOString(),
           lastActive: new Date().toISOString()
         });
+        localStorage.removeItem(`session_${id}`);
       } catch (e) {
         console.error("Failed to update session status");
       }
@@ -2706,6 +2798,16 @@ const ExamPlayer = () => {
                 Memulai ujian akan mengaktifkan <b>Mode Layar Penuh</b>. Keluar dari layar penuh atau berpindah tab akan menyebabkan ujian terkunci otomatis.
               </p>
             </div>
+
+            {localStorage.getItem(`session_${id}`) && !isStarting && (
+              <button 
+                onClick={retrySession}
+                className="w-full mb-3 py-3 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-100 transition-all"
+              >
+                <RotateCcw className="w-5 h-5" />
+                <span>Lanjutkan Sesi Terakhir</span>
+              </button>
+            )}
 
             <button 
               onClick={startExam}
