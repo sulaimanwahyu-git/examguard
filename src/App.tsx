@@ -18,6 +18,7 @@ import {
   query, 
   addDoc, 
   updateDoc,
+  setDoc,
   doc,
   getDoc,
   getDocs,
@@ -1872,8 +1873,7 @@ const StudentHome = () => {
           setAuthError(null);
         } catch (e: any) {
           if (e.code === 'auth/admin-restricted-operation') {
-            console.warn("Anonymous Authentication is disabled in Firebase Console. Students won't be able to start exams.");
-            // We don't log the full error to avoid console clutter
+            console.warn("Anonymous Authentication is disabled in Firebase Console. Continuing as guest.");
           } else {
             console.error("Anonymous auth failed for student:", e);
           }
@@ -1882,8 +1882,15 @@ const StudentHome = () => {
     };
     ensureAuth();
 
-    const unsubExams = onSnapshot(query(collection(db, 'exams'), where('isActive', '!=', false)), (snap) => {
-      setExams(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Exam)));
+    // Fallback timeout to prevent infinite loading
+    const fallbackTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 2500);
+
+    const qExams = query(collection(db, 'exams'), orderBy('createdAt', 'desc'));
+    const unsubExams = onSnapshot(qExams, (snap) => {
+      const allExams = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Exam));
+      setExams(allExams.filter(e => e.isActive !== false));
       setIsLoading(false);
     }, (error) => {
       console.error("Exams listener error:", error);
@@ -1895,12 +1902,15 @@ const StudentHome = () => {
         .map(doc => ({ id: doc.id, ...doc.data() } as Group))
         .filter(g => g.isActive !== false)
       );
+      setIsLoading(false);
     }, (error) => {
       console.error("Groups listener error:", error);
+      setIsLoading(false);
     });
 
     const timer = setInterval(() => setNow(new Date()), 30000);
     return () => {
+      clearTimeout(fallbackTimer);
       unsubExams();
       unsubGroups();
       clearInterval(timer);
@@ -2094,6 +2104,8 @@ const ExamPlayer = () => {
   const navigate = useNavigate();
   const [exam, setExam] = useState<Exam | null>(null);
   const [group, setGroup] = useState<Group | null>(null);
+  const [examLoading, setExamLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [studentName, setStudentName] = useState('');
   const [studentClass, setStudentClass] = useState('');
   const [studentAbsen, setStudentAbsen] = useState('');
@@ -2238,8 +2250,20 @@ const ExamPlayer = () => {
 
   useEffect(() => {
     if (!id) return;
+    setExamLoading(true);
+    setLoadError(null);
+
     const docRef = doc(db, 'exams', id);
+    
+    // Safety fallback timeout
+    const timer = setTimeout(() => {
+      if (!exam) {
+        setExamLoading(false);
+      }
+    }, 4000);
+
     getDoc(docRef).then(async snap => {
+      clearTimeout(timer);
       if (snap.exists()) {
         const data = snap.data() as Exam;
         if (data.isActive === false) {
@@ -2248,22 +2272,37 @@ const ExamPlayer = () => {
           return;
         }
         setExam({ id: snap.id, ...data } as Exam);
+        setExamLoading(false);
         
         if (data.groupId) {
-          const groupSnap = await getDoc(doc(db, 'groups', data.groupId));
-          if (groupSnap.exists()) {
-            const groupData = groupSnap.data() as Group;
-            if (groupData.isActive === false) {
-              setPlayerError("Kelompok ujian ini telah dinonaktifkan oleh administrator.");
-              setTimeout(() => navigate('/'), 3000);
-              return;
+          try {
+            const groupSnap = await getDoc(doc(db, 'groups', data.groupId));
+            if (groupSnap.exists()) {
+              const groupData = groupSnap.data() as Group;
+              if (groupData.isActive === false) {
+                setPlayerError("Kelompok ujian ini telah dinonaktifkan oleh administrator.");
+                setTimeout(() => navigate('/'), 3000);
+                return;
+              }
+              setGroup({ id: groupSnap.id, ...groupData } as Group);
             }
-            setGroup({ id: groupSnap.id, ...groupData } as Group);
+          } catch (gErr) {
+            console.warn("Group fetch error:", gErr);
           }
         }
+      } else {
+        setExamLoading(false);
+        setLoadError("Ujian tidak ditemukan atau telah dihapus.");
       }
+    }).catch(err => {
+      clearTimeout(timer);
+      setExamLoading(false);
+      console.error("Exam load error:", err);
+      setLoadError("Gagal memuat ujian. Periksa koneksi internet Anda.");
     });
-  }, [id]);
+
+    return () => clearTimeout(timer);
+  }, [id, navigate]);
 
     // Anti-cheat & Timer logic
     useEffect(() => {
@@ -2513,62 +2552,60 @@ const ExamPlayer = () => {
         setAudioContext(ctx);
       }
 
-      // Check if authenticated before creating session
+      // Ensure auth without blocking if anonymous auth is restricted
       if (!auth.currentUser) {
         try {
-          // Add a timeout to auth to prevent infinite "starting" state
           const authPromise = signInAnonymously(auth);
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Auth timeout")), 10000));
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Auth timeout")), 4000));
           await Promise.race([authPromise, timeoutPromise]);
         } catch (authErr: any) {
-          console.error("Auth error:", authErr);
-          if (authErr.code === 'auth/admin-restricted-operation') {
-            setPlayerError("Anonymous Authentication belum diaktifkan. Hubungi Admin.");
-          } else if (authErr.message === "Auth timeout" || authErr.code === 'auth/network-request-failed') {
-            setPlayerError("Koneksi internet tidak stabil. Gagal terhubung ke server.");
-          } else {
-            setPlayerError("Gagal menghubungkan ke sistem keamanan. Periksa internet Anda.");
-          }
-          setIsStarting(false);
-          return;
+          console.warn("Anonymous auth failed/disabled, continuing:", authErr);
         }
       }
 
       const startTimeStr = new Date().toISOString();
       
-      // CREATE A DETERMINISTIC SESSION ID
-      // This is the "Silver Bullet" to prevent multiple sessions for the same student
-      const rawId = `${id}_${cleanName}_${cleanClass}_${cleanAbsen}`.replace(/\s+/g, '_');
-      const deterministicSessionId = btoa(rawId).replace(/=/g, ''); // Base64 safe ID
+      // Deterministic Session ID with safe alphanumeric string
+      const safeName = cleanName.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
+      const safeClass = cleanClass.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20);
+      const safeAbsen = cleanAbsen.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 10);
+      const deterministicSessionId = `SSN_${id}_${safeName}_${safeClass}_${safeAbsen}`;
       
       const sessionRef = doc(db, 'exam_sessions', deterministicSessionId);
-      const sessionSnap = await getDoc(sessionRef);
       
-      if (sessionSnap.exists()) {
-        const docData = sessionSnap.data();
-        if (docData.status === 'finished') {
-          setPlayerError("Anda sudah menyelesaikan ujian ini.");
-          setIsStarting(false);
-          return;
-        }
+      try {
+        const sessionSnap = await getDoc(sessionRef);
         
-        // Resume existing session
-        await updateDoc(sessionRef, {
-          lastActive: startTimeStr,
-          status: 'active'
-        });
-      } else {
-        // Create new session with deterministic ID
-        await setDoc(sessionRef, {
-          examId: id,
-          studentName: cleanName,
-          studentClass: cleanClass,
-          studentAbsen: cleanAbsen,
-          startTime: startTimeStr,
-          status: 'active',
-          lastActive: startTimeStr,
-          violationCount: 0
-        });
+        if (sessionSnap.exists()) {
+          const docData = sessionSnap.data();
+          if (docData.status === 'finished') {
+            setPlayerError("Anda sudah menyelesaikan ujian ini.");
+            setIsStarting(false);
+            return;
+          }
+          
+          // Resume existing session
+          await updateDoc(sessionRef, {
+            lastActive: startTimeStr,
+            status: 'active'
+          });
+          setViolationCount(docData.violationCount || 0);
+        } else {
+          // Create new session with deterministic ID
+          await setDoc(sessionRef, {
+            examId: id,
+            studentName: cleanName,
+            studentClass: cleanClass,
+            studentAbsen: cleanAbsen,
+            startTime: startTimeStr,
+            status: 'active',
+            lastActive: startTimeStr,
+            violationCount: 0
+          });
+          setViolationCount(0);
+        }
+      } catch (dbErr) {
+        console.warn("Firestore session start warning (proceeding):", dbErr);
       }
       
       // Save for recovery
@@ -2587,12 +2624,9 @@ const ExamPlayer = () => {
       setIsFrozen(false);
       setIsLocked(false);
       setFreezeTimeLeft(0);
-      if (sessionSnap.exists()) {
-        setViolationCount(sessionSnap.data().violationCount || 0);
-      }
     } catch (err: any) {
       console.error("Critical Start Error:", err);
-      setPlayerError("Gagal memulai ujian. Pastikan koneksi internet stabil (Firestore Error).");
+      setPlayerError("Gagal memulai ujian. Silakan coba lagi.");
     } finally {
       setIsStarting(false);
     }
@@ -2661,7 +2695,45 @@ const ExamPlayer = () => {
     setShowExitModal(true);
   };
 
-  if (!exam) return <div className="p-8 text-center">Memuat ujian...</div>;
+  if (examLoading || (!exam && !loadError)) {
+    return (
+      <div className="min-h-[calc(100vh-80px)] flex items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-gray-100 text-center space-y-4">
+          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
+          <h3 className="text-lg font-black text-gray-900">Menyiapkan Lembar Ujian...</h3>
+          <p className="text-gray-500 text-sm">Sedang memuat data soal dan tata tertib ujian.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError || !exam) {
+    return (
+      <div className="min-h-[calc(100vh-80px)] flex items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-gray-100 text-center space-y-4">
+          <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto">
+            <AlertTriangle className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-black text-gray-900">Gagal Memuat Ujian</h3>
+          <p className="text-gray-500 text-sm">{loadError || "Ujian tidak ditemukan."}</p>
+          <div className="pt-2 flex flex-col gap-2">
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm hover:bg-indigo-700 transition-all shadow-md shadow-indigo-100"
+            >
+              Muat Ulang Halaman
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              className="w-full py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold text-sm hover:bg-gray-200 transition-all"
+            >
+              Kembali ke Beranda
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (isLocked) {
     return (

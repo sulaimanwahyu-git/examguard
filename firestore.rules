@@ -12,10 +12,10 @@ service cloud.firestore {
     // Fields: name, rules, createdAt, isActive
     //
     // Collection: exam_sessions
-    // Fields: examId, studentName, studentClass, studentAbsen, startTime, endTime, status, lastActive
+    // Fields: examId, studentName, studentClass, studentAbsen, startTime, endTime, status, lastActive, violationCount, lockReason
     //
     // Collection: cheat_logs
-    // Fields: examId, studentName, type, details, timestamp
+    // Fields: examId, studentName, type, details, timestamp, sessionId
     //
     // ===============================================================
 
@@ -32,35 +32,7 @@ service cloud.firestore {
         );
     }
 
-    // Validation Helpers
-    function isValidString(val, maxLen) {
-      return val is string && val.size() > 0 && val.size() <= maxLen;
-    }
-
-    function isValidSession(data) {
-      return data.keys().hasAll(['examId', 'studentName', 'studentClass', 'studentAbsen', 'startTime', 'status', 'lastActive']) &&
-             isValidString(data.studentName, 100) &&
-             isValidString(data.studentClass, 50) &&
-             isValidString(data.studentAbsen, 20) &&
-             data.status in ['active', 'finished'];
-    }
-
-    function isValidSessionUpdate(data) {
-      // Only allow updating specific fields
-      return data.diff(resource.data).affectedKeys().hasAny(['lastActive', 'status', 'endTime']) &&
-             data.diff(resource.data).affectedKeys().hasOnly(['lastActive', 'status', 'endTime']) &&
-             (data.status == 'finished' || data.status == resource.data.status);
-    }
-
-    function isValidLog(data) {
-      return data.keys().hasAll(['examId', 'studentName', 'type', 'timestamp']) &&
-             isValidString(data.studentName, 100) &&
-             isValidString(data.type, 50) &&
-             isValidString(data.details, 1000);
-    }
-
     // Rules
-    
     match /exams/{examId} {
       allow read: if true;
       allow write: if isAdmin();
@@ -72,16 +44,16 @@ service cloud.firestore {
     }
 
     match /exam_sessions/{sessionId} {
-      allow read: if isAdmin();
-      allow create: if isAuthenticated() && isValidSession(request.resource.data);
-      allow update: if isAuthenticated() && isValidSessionUpdate(request.resource.data);
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create, update: if true;
       allow delete: if isAdmin();
     }
 
     match /cheat_logs/{logId} {
       allow read: if isAdmin();
-      allow create: if isAuthenticated() && isValidLog(request.resource.data);
-      allow delete: if isAdmin();
+      allow create: if true;
+      allow update, delete: if isAdmin();
     }
 
     match /metadata/{docId} {
