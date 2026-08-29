@@ -376,46 +376,27 @@ const AdminDashboard = () => {
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupRules, setNewGroupRules] = useState('');
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
-  const [groupSearchTerm, setGroupSearchTerm] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isDeletingGroup, setIsDeletingGroup] = useState<string | null>(null);
-  const [showGroupExamsModal, setShowGroupExamsModal] = useState(false);
-  const [managingGroupId, setManagingGroupId] = useState<string | null>(null);
   const [selectedParticipantGroupId, setSelectedParticipantGroupId] = useState<string>('all');
   const [isResetting, setIsResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [examToDelete, setExamToDelete] = useState<string | null>(null);
-  const [bulkToggleAction, setBulkToggleAction] = useState<{ active: boolean } | null>(null);
   const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
   
   const [participantsSearchTerm, setParticipantsSearchTerm] = useState('');
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
-  const [participantNameFilter, setParticipantNameFilter] = useState('');
-  const [participantClassFilter, setParticipantClassFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [violationFilter, setViolationFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
   const [authError, setAuthError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
-  const [pinRequired, setPinRequired] = useState(false);
-  const [pinInput, setPinInput] = useState('');
   const hasAttemptedAuth = useRef(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchTerm(participantsSearchTerm);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [participantsSearchTerm]);
 
   useEffect(() => {
     // Track connection status
     const unsubMetadata = onSnapshot(doc(db, 'metadata', 'status'), { includeMetadataChanges: true }, (doc) => {
       setIsOnline(!doc.metadata.fromCache);
     }, () => {
-      // Fallback if metadata doc doesn't exist or no permission
       window.addEventListener('online', () => setIsOnline(true));
       window.addEventListener('offline', () => setIsOnline(false));
     });
@@ -453,23 +434,21 @@ const AdminDashboard = () => {
     let unsubLogs = () => {};
 
     if (auth.currentUser && !auth.currentUser.isAnonymous) {
-      const qSessions = query(collection(db, 'exam_sessions'), orderBy('startTime', 'desc'));
+      const qSessions = query(collection(db, 'exam_sessions'), orderBy('startTime', 'desc'), limit(500));
       unsubSessions = onSnapshot(qSessions, (snapshot) => {
         setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ExamSession)));
       }, (error) => {
-        // Only log if it's not a permission error (which might happen during logout)
         if (!error.message.includes('permission-denied')) {
-          handleFirestoreError(error, OperationType.GET, 'exam_sessions');
+          console.warn("Sessions listener warning:", error);
         }
       });
 
-      // Limit logs to 2000 most recent to keep client light
-      const qLogs = query(collection(db, 'cheat_logs'), orderBy('timestamp', 'desc'), limit(2000));
+      const qLogs = query(collection(db, 'cheat_logs'), orderBy('timestamp', 'desc'), limit(500));
       unsubLogs = onSnapshot(qLogs, (snapshot) => {
         setCheatLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CheatLog)));
       }, (error) => {
         if (!error.message.includes('permission-denied')) {
-          handleFirestoreError(error, OperationType.GET, 'cheat_logs');
+          console.warn("Logs listener warning:", error);
         }
       });
     }
@@ -504,30 +483,15 @@ const AdminDashboard = () => {
       const exam = examsMap.get(session.examId);
       const matchesGroup = selectedParticipantGroupId === 'all' || exam?.groupId === selectedParticipantGroupId;
       
-      const searchLower = debouncedSearchTerm.toLowerCase();
-      const matchesSearch = !debouncedSearchTerm || 
+      const searchLower = participantsSearchTerm.trim().toLowerCase();
+      const matchesSearch = !searchLower || 
                            session.studentName.toLowerCase().includes(searchLower) ||
                            session.studentClass.toLowerCase().includes(searchLower) ||
                            (exam?.title || '').toLowerCase().includes(searchLower);
       
-      const nameFilterLower = participantNameFilter.toLowerCase();
-      const matchesName = !participantNameFilter || session.studentName.toLowerCase().includes(nameFilterLower);
-      
-      const classFilterLower = participantClassFilter.toLowerCase();
-      const matchesClass = !participantClassFilter || 
-                          session.studentClass.toLowerCase().includes(classFilterLower) ||
-                          session.studentAbsen.toLowerCase().includes(classFilterLower);
-
-      const matchesStatus = statusFilter === 'all' || session.status === statusFilter;
-      
-      const sessionLogs = logsBySession.get(`${session.examId}_${session.studentName}`) || [];
-      const matchesViolation = violationFilter === 'all' || 
-                              (violationFilter === 'none' && sessionLogs.length === 0) ||
-                              (violationFilter === 'any' && sessionLogs.length > 0);
-      
-      return matchesGroup && matchesSearch && matchesName && matchesClass && matchesStatus && matchesViolation;
+      return matchesGroup && matchesSearch;
     });
-  }, [sessions, selectedParticipantGroupId, participantsSearchTerm, participantNameFilter, participantClassFilter, examsMap, statusFilter, violationFilter, logsBySession]);
+  }, [sessions, selectedParticipantGroupId, participantsSearchTerm, examsMap]);
 
   const totalPages = Math.ceil(filteredSessions.length / itemsPerPage);
   const paginatedSessions = useMemo(() => {
@@ -537,12 +501,12 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedParticipantGroupId, debouncedSearchTerm, participantNameFilter, participantClassFilter, statusFilter, violationFilter]);
+  }, [selectedParticipantGroupId, participantsSearchTerm]);
 
   const optimizeUrl = (url: string) => {
     let cleanUrl = url.trim();
     
-    // Jika pengguna memasukkan seluruh tag <iframe>, ambil bagian src-nya saja
+    // Extract src from iframe tag if pasted
     if (cleanUrl.startsWith('<iframe')) {
       const srcMatch = cleanUrl.match(/src=["']([^"']+)["']/);
       if (srcMatch && srcMatch[1]) {
@@ -550,12 +514,12 @@ const AdminDashboard = () => {
       }
     }
     
-    // Google Forms optimization
+    // Google Forms embed optimize
     if (cleanUrl.includes('docs.google.com/forms') && !cleanUrl.includes('embedded=true')) {
       cleanUrl += (cleanUrl.includes('?') ? '&' : '?') + 'embedded=true';
     }
     
-    // Microsoft Forms optimization
+    // Microsoft Forms embed optimize
     if (cleanUrl.includes('forms.office.com') && !cleanUrl.includes('embed=true')) {
       cleanUrl += (cleanUrl.includes('?') ? '&' : '?') + 'embed=true';
     }
@@ -594,8 +558,9 @@ const AdminDashboard = () => {
         });
       }
       closeModal();
+      setNotification({ message: "Ujian berhasil disimpan.", type: 'success' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, editingId ? `exams/${editingId}` : 'exams');
+      console.error("Error saving exam:", error);
       setNotification({ message: "Gagal menyimpan ujian.", type: 'error' });
     }
   };
@@ -621,8 +586,9 @@ const AdminDashboard = () => {
       }
       setNewGroupName('');
       setNewGroupRules('');
+      setNotification({ message: "Kelompok berhasil disimpan.", type: 'success' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, editingGroupId ? `groups/${editingGroupId}` : 'groups');
+      console.error("Error saving group:", error);
       setNotification({ message: "Gagal menyimpan kelompok.", type: 'error' });
     }
   };
@@ -634,7 +600,6 @@ const AdminDashboard = () => {
         isActive: group.isActive === undefined ? false : !group.isActive
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `groups/${group.id}`);
       setNotification({ message: "Gagal mengubah status kelompok.", type: 'error' });
     }
   };
@@ -643,7 +608,6 @@ const AdminDashboard = () => {
     setEditingGroupId(group.id);
     setNewGroupName(group.name);
     setNewGroupRules(group.rules || '');
-    // Scroll to form
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -651,32 +615,17 @@ const AdminDashboard = () => {
     if (!checkPermission()) return;
     try {
       const batch = writeBatch(db);
-      
-      // Update exams that belong to this group
       const groupExams = exams.filter(e => e.groupId === id);
       groupExams.forEach(exam => {
         batch.update(doc(db, 'exams', exam.id), { groupId: deleteField() });
       });
-      
-      // Delete the group
       batch.delete(doc(db, 'groups', id));
-      
       await batch.commit();
       setIsDeletingGroup(null);
+      setNotification({ message: "Kelompok berhasil dihapus.", type: 'success' });
     } catch (error) {
       console.error("Error deleting group:", error);
-      setNotification({ message: "Gagal menghapus kelompok. Silakan coba lagi.", type: 'error' });
-    }
-  };
-
-  const handleToggleExamInGroup = async (examId: string, groupId: string | null) => {
-    if (!checkPermission()) return;
-    try {
-      await updateDoc(doc(db, 'exams', examId), {
-        groupId: groupId
-      });
-    } catch (error) {
-      setNotification({ message: "Gagal memperbarui kelompok ujian.", type: 'error' });
+      setNotification({ message: "Gagal menghapus kelompok.", type: 'error' });
     }
   };
 
@@ -694,10 +643,10 @@ const AdminDashboard = () => {
     setNewExam({
       title: exam.title,
       url: exam.url,
-      startTime: exam.startTime,
-      endTime: exam.endTime,
+      startTime: exam.startTime || '',
+      endTime: exam.endTime || '',
       duration: exam.duration || 60,
-      accessCode: exam.accessCode,
+      accessCode: exam.accessCode || '',
       exitCode: exam.exitCode || '',
       info: exam.info || '',
       rules: exam.rules || '',
@@ -715,7 +664,6 @@ const AdminDashboard = () => {
         isActive: !exam.isActive
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `exams/${exam.id}`);
       setNotification({ message: "Gagal mengubah status ujian.", type: 'error' });
     }
   };
@@ -725,8 +673,8 @@ const AdminDashboard = () => {
     try {
       await deleteDoc(doc(db, 'exams', id));
       setExamToDelete(null);
+      setNotification({ message: "Ujian berhasil dihapus.", type: 'success' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `exams/${id}`);
       setNotification({ message: "Gagal menghapus ujian.", type: 'error' });
     }
   };
@@ -746,7 +694,7 @@ const AdminDashboard = () => {
       const deleteInChunks = async (collectionName: string, queryConstraints: any[]) => {
         let hasMore = true;
         while (hasMore) {
-          const q = query(collection(db, collectionName), ...queryConstraints, limit(400));
+          const q = query(collection(db, collectionName), ...queryConstraints, limit(200));
           const snapshot = await getDocs(q);
           if (snapshot.empty) {
             hasMore = false;
@@ -764,7 +712,6 @@ const AdminDashboard = () => {
       } else {
         const groupExamIds = exams.filter(e => e.groupId === selectedParticipantGroupId).map(e => e.id);
         if (groupExamIds.length > 0) {
-          // Firestore 'in' query is limited to 10 items. We need to chunk the exam IDs.
           for (let i = 0; i < groupExamIds.length; i += 10) {
             const chunk = groupExamIds.slice(i, i + 10);
             await deleteInChunks('exam_sessions', [where('examId', 'in', chunk)]);
@@ -772,7 +719,7 @@ const AdminDashboard = () => {
           }
         }
       }
-      setNotification({ message: "Data berhasil direset.", type: 'success' });
+      setNotification({ message: "Data berhasil dibersihkan.", type: 'success' });
     } catch (error) {
       console.error("Error resetting data:", error);
       setNotification({ message: "Gagal mereset data.", type: 'error' });
@@ -782,7 +729,7 @@ const AdminDashboard = () => {
   };
 
   const handleExportCSV = () => {
-    const headers = ['Nama Siswa', 'Kelas', 'Absen', 'Ujian', 'Kelompok', 'Status', 'Pelanggaran', 'Waktu Mulai', 'Waktu Selesai', 'Aktif Terakhir'];
+    const headers = ['Nama Siswa', 'Kelas', 'Absen', 'Ujian', 'Kelompok', 'Status', 'Pelanggaran', 'Waktu Mulai'];
     const rows = filteredSessions.map(session => {
       const exam = examsMap.get(session.examId);
       const violations = logsBySession.get(`${session.examId}_${session.studentName}`) || [];
@@ -796,9 +743,7 @@ const AdminDashboard = () => {
         group?.name || '-',
         session.status === 'active' ? 'Aktif' : 'Selesai',
         violations.length,
-        format(parseISO(session.startTime), 'yyyy-MM-dd HH:mm:ss'),
-        session.endTime ? format(parseISO(session.endTime), 'yyyy-MM-dd HH:mm:ss') : '-',
-        format(parseISO(session.lastActive), 'yyyy-MM-dd HH:mm:ss')
+        session.startTime ? format(parseISO(session.startTime), 'yyyy-MM-dd HH:mm:ss') : '-'
       ];
     });
 
@@ -811,622 +756,283 @@ const AdminDashboard = () => {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `data_peserta_${format(new Date(), 'yyyyMMdd_HHmm')}.csv`);
+    link.setAttribute('download', `peserta_ujian_${format(new Date(), 'yyyyMMdd_HHmm')}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const handleBulkToggleActive = async (active: boolean) => {
-    if (!checkPermission()) return;
-    try {
-      const batch = writeBatch(db);
-      const groupExams = exams.filter(e => e.groupId === selectedParticipantGroupId);
-      groupExams.forEach(exam => {
-        batch.update(doc(db, 'exams', exam.id), { isActive: active });
-      });
-      await batch.commit();
-      setBulkToggleAction(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'exams');
-      console.error("Error bulk toggling:", error);
-    }
-  };
-
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
       {auth.currentUser?.isAnonymous && localStorage.getItem('admin_access_type') !== 'code' && (
-        <div className="mb-6 p-6 bg-amber-50 border-2 border-amber-200 rounded-2xl flex flex-col sm:flex-row items-center gap-4 shadow-sm">
-          <div className="bg-amber-100 p-3 rounded-xl text-amber-600">
-            <Lock className="w-6 h-6" />
-          </div>
-          <div className="flex-1 text-center sm:text-left">
-            <h4 className="font-black text-amber-900 leading-tight">Mode Baca Saja (Akses Terbatas)</h4>
-            <p className="text-xs font-bold text-amber-700 mt-0.5">Anda masuk dengan kata sandi. Untuk menambah, mengedit, atau menghapus data, silakan masuk menggunakan Google dengan email Administrator.</p>
+        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Lock className="w-5 h-5 text-amber-600 shrink-0" />
+            <p className="text-xs font-bold text-amber-800">Mode Lihat Saja. Masuk dengan Google/Kode Akses untuk mengedit.</p>
           </div>
           <button 
             onClick={() => {
               localStorage.removeItem('admin_token');
               window.location.reload();
             }}
-            className="bg-amber-600 text-white px-6 py-2 rounded-xl font-black text-xs uppercase hover:bg-amber-700 transition-all shadow-md shadow-amber-100"
+            className="bg-amber-600 text-white px-4 py-1.5 rounded-xl font-bold text-xs hover:bg-amber-700"
           >
-            Masuk dengan Google
+            Login Google
           </button>
         </div>
       )}
 
-      {authError && (
-        <div className="mb-6 p-6 bg-red-50 border-4 border-red-200 rounded-[2rem] flex flex-col sm:flex-row items-center gap-6 shadow-xl shadow-red-100 animate-pulse">
-          <div className="bg-red-100 p-4 rounded-2xl text-red-600">
-            <AlertTriangle className="w-8 h-8" />
+      {/* Header & Tabs */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 pb-4 border-b border-gray-200">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <div className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
+              {isOnline ? 'Online & Siap' : 'Offline'}
+            </span>
           </div>
-          <div className="flex-1 text-center sm:text-left">
-            <h3 className="text-xl font-black text-red-900 uppercase tracking-tight">Konfigurasi Firebase Diperlukan</h3>
-            <p className="text-red-700 font-bold mt-1">Fitur 'Anonymous Authentication' belum aktif. Siswa tidak akan bisa mengerjakan ujian.</p>
-            <div className="mt-4 flex flex-wrap gap-3 justify-center sm:justify-start">
-              <a 
-                href="https://console.firebase.google.com/project/gen-lang-client-0267198588/authentication/providers" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="bg-red-600 text-white px-6 py-2 rounded-xl font-black text-xs uppercase hover:bg-red-700 transition-all flex items-center gap-2"
-              >
-                <ExternalLink className="w-4 h-4" />
-                Buka Firebase Console
-              </a>
-              <button 
-                onClick={() => window.location.reload()}
-                className="bg-white text-red-600 border-2 border-red-200 px-6 py-2 rounded-xl font-black text-xs uppercase hover:bg-red-50 transition-all"
-              >
-                Sudah Saya Aktifkan
-              </button>
-            </div>
-          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">Panel Pengawas Ujian</h1>
         </div>
-      )}
-      {!auth.currentUser && !authError && (
-        <div className="mb-6 p-4 bg-amber-50 border-2 border-amber-200 rounded-2xl flex items-center gap-4 text-amber-800">
-          <AlertTriangle className="w-6 h-6 shrink-0" />
-          <div className="text-sm">
-            <p className="font-bold">Peringatan: Koneksi Database Terbatas</p>
-            <p>Anda berhasil masuk ke panel, tetapi Firebase belum terkonfigurasi dengan benar. Anda mungkin bisa melihat data, tetapi tidak bisa menyimpan perubahan. Pastikan <b>Anonymous Auth</b> aktif dan <b>Domain</b> terdaftar di Firebase Console.</p>
-          </div>
-        </div>
-      )}
-      <div className="flex flex-col items-center gap-8 mb-12">
-        <div className="text-center">
-          <div className="flex flex-col items-center gap-1 mb-2">
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-              <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">
-                {isOnline ? 'Sistem Terhubung (Real-time)' : 'Koneksi Terputus (Offline)'}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-[9px] font-bold text-gray-300 uppercase tracking-tighter">
-              <RotateCcw className="w-2 h-2" />
-              Update Terakhir: {format(lastUpdated, 'HH:mm:ss')}
-            </div>
-          </div>
-          <h1 className="text-4xl font-black text-gray-900 tracking-tight">Panel Kontrol Admin</h1>
-          <p className="text-gray-500 mt-2 font-medium">Kelola ujian, kelompok, dan pantau peserta secara real-time</p>
-        </div>
-        
-        <div className="flex bg-gray-100 p-1.5 rounded-2xl w-full max-w-2xl shadow-inner">
+
+        <div className="flex bg-gray-100 p-1 rounded-xl w-full sm:w-auto">
           <button 
             onClick={() => setActiveTab('exams')}
-            className={`flex-1 flex items-center justify-center gap-3 py-4 rounded-xl text-lg font-black transition-all ${activeTab === 'exams' ? 'bg-white text-indigo-600 shadow-xl' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${activeTab === 'exams' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}
           >
-            <List className="w-6 h-6" />
-            Ujian
+            <List className="w-4 h-4" />
+            <span>Daftar Ujian</span>
           </button>
           <button 
             onClick={() => setActiveTab('groups')}
-            className={`flex-1 flex items-center justify-center gap-3 py-4 rounded-xl text-lg font-black transition-all ${activeTab === 'groups' ? 'bg-white text-indigo-600 shadow-xl' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${activeTab === 'groups' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}
           >
-            <LayoutGrid className="w-6 h-6" />
-            Kelompok
+            <LayoutGrid className="w-4 h-4" />
+            <span>Kelompok / Kelas</span>
           </button>
           <button 
             onClick={() => setActiveTab('participants')}
-            className={`flex-1 flex items-center justify-center gap-3 py-4 rounded-xl text-lg font-black transition-all ${activeTab === 'participants' ? 'bg-white text-indigo-600 shadow-xl' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${activeTab === 'participants' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}
           >
-            <User className="w-6 h-6" />
-            Peserta
+            <User className="w-4 h-4" />
+            <span>Pantau Peserta</span>
           </button>
         </div>
       </div>
 
+      {/* Tab: Ujian */}
       {activeTab === 'exams' && (
-        <>
-          <div className="flex justify-end mb-6">
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <p className="text-xs font-bold text-gray-500">{exams.length} Ujian Terdaftar</p>
             <button 
               onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-black hover:bg-indigo-700 transition-all shadow-md shadow-indigo-100"
             >
-              <Plus className="w-5 h-5" />
-              Ujian Baru
+              <Plus className="w-4 h-4" />
+              <span>Tambah Ujian</span>
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {exams.map(exam => (
-              <motion.div 
+              <div 
                 key={exam.id}
-                layout
-                className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-all"
+                className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-3"
               >
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex flex-col truncate pr-4">
-                    <h3 className="text-xl font-bold text-gray-900 truncate">{exam.title}</h3>
-                    <div className="flex gap-2 mt-1">
-                      <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded w-fit ${exam.isActive !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                <div className="flex justify-between items-start gap-2">
+                  <div className="min-w-0">
+                    <h3 className="text-base font-bold text-gray-900 truncate">{exam.title}</h3>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${exam.isActive !== false ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                         {exam.isActive !== false ? 'Aktif' : 'Nonaktif'}
                       </span>
                       {exam.groupId && (
-                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded w-fit bg-indigo-100 text-indigo-700">
-                          {groups.find(g => g.id === exam.groupId)?.name || 'Kelompok Terhapus'}
+                        <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 truncate max-w-[120px]">
+                          {groups.find(g => g.id === exam.groupId)?.name || 'Kelompok'}
                         </span>
                       )}
                     </div>
                   </div>
-                  <div className="bg-indigo-50 text-indigo-700 text-xs font-bold px-2 py-1 rounded">
-                    KODE: {exam.accessCode}
-                  </div>
-                </div>
-                
-                <div className="space-y-3 mb-6">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Waktu Aktif</span>
-                    <div className="flex items-center gap-2 text-sm font-semibold text-indigo-600 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-100">
-                      <Clock className="w-4 h-4" />
-                      <span>
-                        {format(parseISO(exam.startTime), 'd MMM yyyy, HH:mm', { locale: localeId })} 
-                        <span className="mx-2 text-indigo-300">sampai</span>
-                        {format(parseISO(exam.endTime), 'HH:mm')}
-                      </span>
+                  {exam.accessCode && (
+                    <div className="bg-gray-100 text-gray-800 text-[11px] font-black px-2 py-1 rounded shrink-0">
+                      KODE: {exam.accessCode}
                     </div>
+                  )}
+                </div>
+
+                <div className="bg-gray-50 p-2.5 rounded-xl text-xs text-gray-600 space-y-1">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <Clock className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    <span>Durasi: {exam.duration || 60} Menit</span>
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-gray-500 italic">
-                    <ExternalLink className="w-3 h-3" />
+                  <div className="flex items-center gap-1.5 text-gray-400 truncate">
+                    <Link className="w-3.5 h-3.5 shrink-0" />
                     <span className="truncate">{exam.url}</span>
                   </div>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2 pt-1 border-t border-gray-100">
                   <button 
                     onClick={() => copyToClipboard(exam.id)}
-                    className="flex-1 flex items-center justify-center gap-2 py-2 bg-gray-50 text-gray-700 rounded-lg hover:bg-gray-100 transition-all text-sm font-medium"
+                    className="flex-1 py-1.5 bg-gray-50 text-gray-700 rounded-lg hover:bg-gray-100 text-xs font-bold flex items-center justify-center gap-1.5"
                   >
-                    {copiedId === exam.id ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <Link className="w-4 h-4" />}
-                    {copiedId === exam.id ? "Tersalin" : "Salin Link"}
+                    {copiedId === exam.id ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedId === exam.id ? "Tersalin" : "Salin Link"}</span>
                   </button>
                   <button 
                     onClick={() => handleEdit(exam)}
-                    className="p-2 text-gray-400 hover:text-indigo-600 transition-all"
-                    title="Edit Ujian"
+                    className="p-1.5 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-gray-50"
+                    title="Edit"
                   >
-                    <Edit className="w-5 h-5" />
+                    <Edit className="w-4 h-4" />
                   </button>
                   <button 
                     onClick={() => handleToggleActive(exam)}
-                    className={`p-2 transition-all ${exam.isActive !== false ? 'text-indigo-600 hover:text-amber-500' : 'text-gray-300 hover:text-indigo-600'}`}
-                    title={exam.isActive !== false ? "Nonaktifkan" : "Aktifkan"}
+                    className={`p-1.5 rounded-lg hover:bg-gray-50 ${exam.isActive !== false ? 'text-emerald-600' : 'text-gray-300'}`}
+                    title="Aktif/Nonaktif"
                   >
-                    {exam.isActive !== false ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+                    <Power className="w-4 h-4" />
                   </button>
                   <button 
                     onClick={() => setExamToDelete(exam.id)}
-                    className="p-2 text-gray-400 hover:text-red-600 transition-all"
-                    title="Hapus Ujian"
+                    className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-gray-50"
+                    title="Hapus"
                   >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {activeTab === 'groups' && (
-        <div className="max-w-2xl">
-          <form onSubmit={handleAddGroup} className="flex flex-col gap-3 mb-8 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden">
-            {editingGroupId && (
-              <div className="absolute top-0 left-0 w-1 h-full bg-amber-500" />
-            )}
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="font-bold text-gray-900">{editingGroupId ? 'Edit Kelompok' : 'Buat Kelompok Baru'}</h3>
-              {editingGroupId && (
-                <button 
-                  type="button"
-                  onClick={() => {
-                    setEditingGroupId(null);
-                    setNewGroupName('');
-                    setNewGroupRules('');
-                  }}
-                  className="text-xs font-bold text-amber-600 hover:text-amber-700 flex items-center gap-1"
-                >
-                  <X className="w-3 h-3" />
-                  Batal Edit
-                </button>
-              )}
-            </div>
-            <input 
-              type="text" 
-              placeholder="Nama Kelompok (misal: Kelas 7)"
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-              value={newGroupName}
-              onChange={e => setNewGroupName(e.target.value)}
-            />
-            <textarea 
-              placeholder="Tata Tertib Kelompok (akan muncul di semua ujian dalam kelompok ini)"
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none h-32 resize-none"
-              value={newGroupRules}
-              onChange={e => setNewGroupRules(e.target.value)}
-            />
-            <button 
-              type="submit"
-              className={`w-full py-3 rounded-xl font-bold transition-all shadow-lg flex items-center justify-center gap-2 ${
-                editingGroupId 
-                  ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-amber-100' 
-                  : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-100'
-              }`}
-            >
-              {editingGroupId ? <CheckCircle2 className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
-              {editingGroupId ? 'Simpan Perubahan' : 'Tambah Kelompok'}
-            </button>
-          </form>
-
-          <div className="space-y-3">
-            {groups.map(group => (
-              <div key={group.id} className={`bg-white p-4 rounded-xl border flex justify-between items-center hover:border-indigo-200 transition-all group ${group.isActive === false ? 'opacity-60 border-gray-200' : 'border-gray-200'}`}>
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-2">
-                    <span className={`font-bold ${group.isActive === false ? 'text-gray-500 line-through' : 'text-gray-900'}`}>{group.name}</span>
-                    {group.isActive === false && (
-                      <span className="bg-gray-100 text-gray-500 px-2 py-0.5 rounded text-[8px] font-black uppercase">Nonaktif</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] text-gray-400 font-bold uppercase">
-                      {exams.filter(e => e.groupId === group.id).length} Ujian Terdaftar
-                    </span>
-                    {group.rules && (
-                      <span className="text-[10px] text-indigo-400 font-bold uppercase flex items-center gap-1">
-                        <BookOpen className="w-2.5 h-2.5" />
-                        Ada Tata Tertib
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button 
-                    onClick={() => handleToggleGroupActive(group)}
-                    className={`p-2 rounded-lg transition-all ${group.isActive === false ? 'text-gray-400 hover:text-green-600' : 'text-green-600 hover:bg-green-50'}`}
-                    title={group.isActive === false ? 'Aktifkan Kelompok' : 'Nonaktifkan Kelompok'}
-                  >
-                    <Power className="w-5 h-5" />
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setManagingGroupId(group.id);
-                      setShowGroupExamsModal(true);
-                    }}
-                    className="flex items-center gap-2 text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-3 py-2 rounded-lg hover:bg-indigo-100 transition-all"
-                    title="Kelola Ujian"
-                  >
-                    <LayoutGrid className="w-3.5 h-3.5" />
-                    Ujian
-                  </button>
-                  <button 
-                    onClick={() => handleEditGroup(group)}
-                    className="p-2 text-gray-400 hover:text-amber-500 transition-all"
-                    title="Edit Kelompok"
-                  >
-                    <Edit className="w-5 h-5" />
-                  </button>
-                  <button 
-                    onClick={() => setIsDeletingGroup(group.id)}
-                    className="p-2 text-gray-400 hover:text-red-600 transition-all"
-                    title="Hapus Kelompok"
-                  >
-                    <Trash2 className="w-5 h-5" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
             ))}
-            {groups.length === 0 && <p className="text-center text-gray-500 py-8">Belum ada kelompok.</p>}
+            {exams.length === 0 && (
+              <div className="col-span-full py-12 text-center bg-white rounded-2xl border border-dashed border-gray-200 p-6">
+                <p className="text-gray-400 font-bold text-sm">Belum ada ujian. Klik tombol Tambah Ujian di atas.</p>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Notification Toast */}
-      <AnimatePresence>
-        {notification && (
-          <motion.div 
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
-            className={`fixed bottom-8 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 font-bold text-sm ${notification.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}
-          >
-            {notification.type === 'success' ? <Shield className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
-            {notification.message}
-            <button onClick={() => setNotification(null)} className="ml-4 hover:opacity-70">
-              <X className="w-4 h-4" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Delete Group Confirmation Modal */}
-      <AnimatePresence>
-        {isDeletingGroup && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center"
-            >
-              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Trash2 className="w-8 h-8" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Hapus Kelompok?</h3>
-              <p className="text-gray-500 text-sm mb-6">
-                Semua ujian di dalam kelompok <strong>{groups.find(g => g.id === isDeletingGroup)?.name}</strong> akan dilepas menjadi "Tanpa Kelompok". Tindakan ini tidak dapat dibatalkan.
-              </p>
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setIsDeletingGroup(null)}
-                  className="flex-1 py-3 border border-gray-300 rounded-xl font-bold text-gray-700 hover:bg-gray-50 transition-all"
-                >
-                  Batal
-                </button>
-                <button 
-                  onClick={() => handleDeleteGroup(isDeletingGroup)}
-                  className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100"
-                >
-                  Ya, Hapus
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Exam Deletion Confirmation Modal */}
-      <AnimatePresence>
-        {examToDelete && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[120] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center"
-            >
-              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Trash2 className="w-8 h-8" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Hapus Ujian?</h3>
-              <p className="text-gray-500 text-sm mb-6">
-                Ujian <strong>{exams.find(e => e.id === examToDelete)?.title}</strong> akan dihapus secara permanen.
-              </p>
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setExamToDelete(null)}
-                  className="flex-1 py-3 border border-gray-300 rounded-xl font-bold text-gray-700 hover:bg-gray-50 transition-all"
-                >
-                  Batal
-                </button>
-                <button 
-                  onClick={() => handleDelete(examToDelete)}
-                  className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100"
-                >
-                  Ya, Hapus
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Bulk Toggle Confirmation Modal */}
-      <AnimatePresence>
-        {bulkToggleAction && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[120] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center"
-            >
-              <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${bulkToggleAction.active ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'}`}>
-                <Shield className="w-8 h-8" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">{bulkToggleAction.active ? 'Aktifkan Semua?' : 'Nonaktifkan Semua?'}</h3>
-              <p className="text-gray-500 text-sm mb-6">
-                {bulkToggleAction.active ? 'Aktifkan' : 'Nonaktifkan'} semua ujian dalam kelompok <strong>{groups.find(g => g.id === selectedParticipantGroupId)?.name}</strong>?
-              </p>
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setBulkToggleAction(null)}
-                  className="flex-1 py-3 border border-gray-300 rounded-xl font-bold text-gray-700 hover:bg-gray-50 transition-all"
-                >
-                  Batal
-                </button>
-                <button 
-                  onClick={() => handleBulkToggleActive(bulkToggleAction.active)}
-                  className={`flex-1 py-3 text-white rounded-xl font-bold transition-all shadow-lg ${bulkToggleAction.active ? 'bg-green-600 hover:bg-green-700 shadow-green-100' : 'bg-amber-500 hover:bg-amber-600 shadow-amber-100'}`}
-                >
-                  Ya, {bulkToggleAction.active ? 'Aktifkan' : 'Nonaktifkan'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Reset Data Confirmation Modal */}
-      <AnimatePresence>
-        {showResetConfirm && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[120] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center"
-            >
-              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertTriangle className="w-8 h-8" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Reset Data Peserta?</h3>
-              <p className="text-gray-500 text-sm mb-6">
-                Tindakan ini akan menghapus semua sesi aktif dan log pelanggaran untuk <strong>{selectedParticipantGroupId === 'all' ? 'Semua Kelompok' : groups.find(g => g.id === selectedParticipantGroupId)?.name}</strong>. Data yang dihapus tidak dapat dikembalikan.
-              </p>
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setShowResetConfirm(false)}
-                  className="flex-1 py-3 border border-gray-300 rounded-xl font-bold text-gray-700 hover:bg-gray-50 transition-all"
-                >
-                  Batal
-                </button>
-                <button 
-                  onClick={handleResetData}
-                  className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100"
-                >
-                  Ya, Reset
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {activeTab === 'participants' && (
-        <div className="space-y-6">
-          <div className="flex flex-col gap-4 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest mr-2">Filter Kelompok:</span>
-                <button 
-                  onClick={() => setSelectedParticipantGroupId('all')}
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${selectedParticipantGroupId === 'all' ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
-                >
-                  Semua
-                </button>
-                {groups.map(group => (
+      {/* Tab: Kelompok */}
+      {activeTab === 'groups' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="md:col-span-1">
+            <form onSubmit={handleAddGroup} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+              <h3 className="font-black text-gray-900 text-sm">{editingGroupId ? 'Edit Kelompok' : 'Buat Kelompok Baru'}</h3>
+              <input 
+                type="text" 
+                placeholder="Nama (contoh: Kelas 7, Kelas 8)"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                value={newGroupName}
+                onChange={e => setNewGroupName(e.target.value)}
+              />
+              <textarea 
+                placeholder="Tata tertib khusus kelompok (opsional)"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none h-24 resize-none"
+                value={newGroupRules}
+                onChange={e => setNewGroupRules(e.target.value)}
+              />
+              <div className="flex gap-2">
+                {editingGroupId && (
                   <button 
-                    key={group.id}
-                    onClick={() => setSelectedParticipantGroupId(group.id)}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${selectedParticipantGroupId === group.id ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'} ${group.isActive === false ? 'opacity-50' : ''}`}
+                    type="button"
+                    onClick={() => {
+                      setEditingGroupId(null);
+                      setNewGroupName('');
+                      setNewGroupRules('');
+                    }}
+                    className="py-2 px-3 border border-gray-300 rounded-xl text-xs font-bold text-gray-600"
                   >
-                    {group.name} {group.isActive === false && '(Nonaktif)'}
+                    Batal
                   </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-2">
-                {selectedParticipantGroupId !== 'all' && (
-                  <div className="flex items-center gap-2 mr-4 pr-4 border-r border-gray-100">
-                    <button 
-                      onClick={() => setBulkToggleAction({ active: true })}
-                      className="flex items-center gap-2 px-3 py-2 bg-green-50 text-green-600 rounded-xl text-[10px] font-black uppercase hover:bg-green-100 transition-all border border-green-100"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      Aktifkan Semua
-                    </button>
-                    <button 
-                      onClick={() => setBulkToggleAction({ active: false })}
-                      className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-600 rounded-xl text-[10px] font-black uppercase hover:bg-amber-100 transition-all border border-amber-100"
-                    >
-                      <EyeOff className="w-3.5 h-3.5" />
-                      Nonaktifkan Semua
-                    </button>
-                  </div>
                 )}
                 <button 
-                  onClick={handleExportCSV}
-                  className="flex items-center gap-2 bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-indigo-100 transition-all border border-indigo-100"
+                  type="submit"
+                  className="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 shadow-md shadow-indigo-100"
                 >
-                  <Download className="w-4 h-4" />
-                  Ekspor CSV
-                </button>
-                <button 
-                  onClick={() => setShowResetConfirm(true)}
-                  disabled={isResetting}
-                  className="flex items-center gap-2 bg-red-50 text-red-600 px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-red-100 transition-all border border-red-100 disabled:opacity-50"
-                >
-                  <RotateCcw className={`w-4 h-4 ${isResetting ? 'animate-spin' : ''}`} />
-                  {isResetting ? 'Mereset...' : 'Reset Data'}
+                  {editingGroupId ? 'Simpan' : 'Tambah Kelompok'}
                 </button>
               </div>
+            </form>
+          </div>
+
+          <div className="md:col-span-2 space-y-3">
+            {groups.map(group => (
+              <div key={group.id} className="bg-white p-4 rounded-xl border border-gray-200 flex justify-between items-center shadow-sm">
+                <div>
+                  <h4 className="font-bold text-sm text-gray-900">{group.name}</h4>
+                  <p className="text-[11px] text-gray-400 font-medium">
+                    {exams.filter(e => e.groupId === group.id).length} Ujian di kelompok ini
+                  </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={() => handleToggleGroupActive(group)}
+                    className={`p-1.5 rounded-lg ${group.isActive === false ? 'text-gray-300' : 'text-emerald-600'}`}
+                    title="Aktif/Nonaktif"
+                  >
+                    <Power className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => handleEditGroup(group)}
+                    className="p-1.5 text-gray-400 hover:text-indigo-600 rounded-lg"
+                    title="Edit"
+                  >
+                    <Edit className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => setIsDeletingGroup(group.id)}
+                    className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg"
+                    title="Hapus"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {groups.length === 0 && (
+              <p className="text-gray-400 text-xs text-center py-8">Belum ada kelompok ujian.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Peserta */}
+      {activeTab === 'participants' && (
+        <div className="space-y-4">
+          <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+            <div className="flex items-center gap-2 flex-1">
+              <Search className="w-4 h-4 text-gray-400 shrink-0" />
+              <input 
+                type="text"
+                placeholder="Cari nama atau kelas siswa..."
+                className="w-full text-xs outline-none bg-transparent"
+                value={participantsSearchTerm}
+                onChange={e => setParticipantsSearchTerm(e.target.value)}
+              />
+              {participantsSearchTerm && (
+                <button onClick={() => setParticipantsSearchTerm('')} className="text-gray-400">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
 
-            <div className="flex flex-col lg:flex-row gap-4">
-              <div className="relative flex-[2]">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input 
-                  type="text"
-                  placeholder="Cari nama, kelas, atau judul ujian..."
-                  className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm"
-                  value={participantsSearchTerm}
-                  onChange={e => setParticipantsSearchTerm(e.target.value)}
-                />
-              </div>
-              <div className="relative flex-1">
-                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input 
-                  type="text"
-                  placeholder="Nama Siswa..."
-                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-xs"
-                  value={participantNameFilter}
-                  onChange={e => setParticipantNameFilter(e.target.value)}
-                />
-              </div>
-              <div className="relative flex-1">
-                <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input 
-                  type="text"
-                  placeholder="Kelas / No Absen..."
-                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-xs"
-                  value={participantClassFilter}
-                  onChange={e => setParticipantClassFilter(e.target.value)}
-                />
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <select 
-                  className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-600 outline-none focus:ring-2 focus:ring-indigo-500"
-                  value={statusFilter}
-                  onChange={e => setStatusFilter(e.target.value)}
-                >
-                  <option value="all">SEMUA STATUS</option>
-                  <option value="active">SEDANG MENGERJAKAN</option>
-                  <option value="completed">SELESAI</option>
-                </select>
-                <select 
-                  className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-600 outline-none focus:ring-2 focus:ring-indigo-500"
-                  value={violationFilter}
-                  onChange={e => setViolationFilter(e.target.value)}
-                >
-                  <option value="all">SEMUA PELANGGARAN</option>
-                  <option value="none">TANPA PELANGGARAN</option>
-                  <option value="any">ADA PELANGGARAN</option>
-                </select>
-                {(participantsSearchTerm || participantNameFilter || participantClassFilter || statusFilter !== 'all' || violationFilter !== 'all') && (
-                  <button 
-                    onClick={() => {
-                      setParticipantsSearchTerm('');
-                      setParticipantNameFilter('');
-                      setParticipantClassFilter('');
-                      setStatusFilter('all');
-                      setViolationFilter('all');
-                    }}
-                    className="p-3 text-red-500 hover:bg-red-50 rounded-xl transition-all border border-red-100"
-                    title="Bersihkan Filter"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                )}
-              </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button 
+                onClick={handleExportCSV}
+                className="flex items-center gap-1.5 bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-indigo-100"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Unduh CSV</span>
+              </button>
+              <button 
+                onClick={() => setShowResetConfirm(true)}
+                disabled={isResetting}
+                className="flex items-center gap-1.5 bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-red-100 disabled:opacity-50"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
+                <span>Bersihkan Sesi</span>
+              </button>
             </div>
           </div>
 
@@ -1435,27 +1041,40 @@ const AdminDashboard = () => {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Siswa</th>
-                    <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Kelas / Absen</th>
-                    <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Ujian</th>
-                    <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Pelanggaran</th>
-                    <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Waktu</th>
+                    <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Siswa</th>
+                    <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Kelas/Absen</th>
+                    <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Ujian</th>
+                    <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Pelanggaran</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {paginatedSessions.map(session => (
-                    <ParticipantRow 
-                      key={session.id}
-                      session={session}
-                      exam={examsMap.get(session.examId)}
-                      violations={logsBySession.get(`${session.examId}_${session.studentName}`) || []}
-                      groups={groups}
-                    />
-                  ))}
+                <tbody className="divide-y divide-gray-100 text-xs">
+                  {paginatedSessions.map(session => {
+                    const exam = examsMap.get(session.examId);
+                    const violations = logsBySession.get(`${session.examId}_${session.studentName}`) || [];
+                    return (
+                      <tr key={session.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-bold text-gray-900">{session.studentName}</td>
+                        <td className="px-4 py-3 text-gray-600 font-medium">
+                          {session.studentClass} ({session.studentAbsen})
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 truncate max-w-[180px]">{exam?.title || 'Ujian'}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded font-black text-[10px] uppercase ${session.status === 'active' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            {session.status === 'active' ? 'Mengerjakan' : 'Selesai'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`font-bold ${violations.length > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                            {violations.length}x
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {filteredSessions.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-gray-500">Belum ada aktivitas peserta yang sesuai kriteria.</td>
+                      <td colSpan={5} className="px-4 py-8 text-center text-gray-400">Belum ada siswa yang mengerjakan.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1463,23 +1082,20 @@ const AdminDashboard = () => {
             </div>
 
             {totalPages > 1 && (
-              <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-                <p className="text-xs text-gray-500 font-medium">
-                  Menampilkan <span className="font-bold text-gray-900">{paginatedSessions.length}</span> dari <span className="font-bold text-gray-900">{filteredSessions.length}</span> peserta
-                </p>
-                <div className="flex items-center gap-2">
+              <div className="bg-gray-50 px-4 py-2.5 border-t border-gray-200 flex items-center justify-between text-xs">
+                <span className="text-gray-500">Hal {currentPage} dari {totalPages}</span>
+                <div className="flex gap-1">
                   <button 
                     onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                     disabled={currentPage === 1}
-                    className="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-all"
+                    className="p-1 rounded bg-white border border-gray-200 disabled:opacity-50"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
-                  <span className="text-xs font-bold text-gray-700">Halaman {currentPage} dari {totalPages}</span>
                   <button 
                     onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                     disabled={currentPage === totalPages}
-                    className="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-all"
+                    className="p-1 rounded bg-white border border-gray-200 disabled:opacity-50"
                   >
                     <ChevronRight className="w-4 h-4" />
                   </button>
@@ -1490,238 +1106,194 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      {/* Modal Kelola Ujian dalam Kelompok */}
-      <AnimatePresence>
-        {showGroupExamsModal && managingGroupId && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowGroupExamsModal(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 overflow-hidden flex flex-col max-h-[85vh]"
-            >
-              <div className="flex justify-between items-center mb-4">
-                <div className="flex flex-col">
-                  <h2 className="text-xl font-black text-gray-900 leading-tight">Kelola Ujian</h2>
-                  <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest">{groups.find(g => g.id === managingGroupId)?.name}</p>
-                </div>
-                <button onClick={() => setShowGroupExamsModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition-all">
-                  <X className="w-6 h-6 text-gray-400" />
-                </button>
+      {/* Notification Toast */}
+      {notification && (
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] px-4 py-2 rounded-xl shadow-lg flex items-center gap-2 text-xs font-bold text-white ${notification.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
+          <span>{notification.message}</span>
+          <button onClick={() => setNotification(null)} className="ml-2">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Add / Edit Exam Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-black text-gray-900">{editingId ? 'Edit Ujian' : 'Tambah Ujian Baru'}</h2>
+              <button onClick={closeModal} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddExam} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Kelompok Ujian</label>
+                <select 
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={newExam.groupId}
+                  onChange={e => setNewExam({...newExam, groupId: e.target.value})}
+                >
+                  <option value="">Tanpa Kelompok (Ujian Bebas)</option>
+                  {groups.map(g => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
               </div>
 
-              <div className="relative mb-4">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Judul Ujian</label>
                 <input 
+                  required
                   type="text" 
-                  placeholder="Cari ujian..."
-                  className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                  value={groupSearchTerm}
-                  onChange={e => setGroupSearchTerm(e.target.value)}
+                  placeholder="Contoh: Penilaian Harian Matematika"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={newExam.title}
+                  onChange={e => setNewExam({...newExam, title: e.target.value})}
                 />
               </div>
-              
-              <div className="space-y-2 overflow-y-auto pr-2 flex-1 custom-scrollbar">
-                {exams
-                  .filter(exam => exam.title.toLowerCase().includes(groupSearchTerm.toLowerCase()))
-                  .map(exam => {
-                    const isInGroup = exam.groupId === managingGroupId;
-                    return (
-                      <div 
-                        key={exam.id} 
-                        className={`flex justify-between items-center p-3 rounded-xl border-2 transition-all ${isInGroup ? 'border-indigo-100 bg-indigo-50' : 'border-gray-100 bg-white hover:border-gray-200'}`}
-                      >
-                        <div className="flex flex-col truncate pr-4">
-                          <span className="font-bold text-sm text-gray-900 truncate">{exam.title}</span>
-                          <span className="text-[10px] text-gray-400 font-medium">
-                            {exam.groupId && !isInGroup ? `Kelompok: ${groups.find(g => g.id === exam.groupId)?.name}` : exam.groupId ? 'Di Kelompok Ini' : 'Tanpa Kelompok'}
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => handleToggleExamInGroup(exam.id, isInGroup ? null : managingGroupId)}
-                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${isInGroup ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
-                        >
-                          {isInGroup ? 'Hapus' : 'Tambah'}
-                        </button>
-                      </div>
-                    );
-                  })}
-                {exams.length === 0 && <p className="text-center text-gray-500 py-4">Belum ada ujian yang dibuat.</p>}
-                {exams.length > 0 && exams.filter(exam => exam.title.toLowerCase().includes(groupSearchTerm.toLowerCase())).length === 0 && (
-                  <p className="text-center text-gray-500 py-4 text-sm">Tidak ada ujian yang cocok.</p>
-                )}
-              </div>
-              
-              <button 
-                onClick={() => {
-                  setShowGroupExamsModal(false);
-                  setGroupSearchTerm('');
-                }}
-                className="w-full mt-6 py-3 bg-gray-900 text-white rounded-xl font-bold hover:bg-black transition-all shadow-lg"
-              >
-                Selesai
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
-      {/* Modal Tambah */}
-      <AnimatePresence>
-        {showAddModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowAddModal(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-8 max-h-[90vh] overflow-y-auto"
-            >
-              <h2 className="text-2xl font-bold mb-6">{editingId ? 'Edit Ujian' : 'Buat Ujian Baru'}</h2>
-              <form onSubmit={handleAddExam} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Link Soal (Google Forms / MS Forms / Web Soal)</label>
+                <input 
+                  required
+                  type="text" 
+                  placeholder="https://docs.google.com/forms/d/e/... atau https://forms.office.com/..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={newExam.url}
+                  onChange={e => setNewExam({...newExam, url: e.target.value})}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Kelompok Ujian</label>
-                  <select 
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                    value={newExam.groupId}
-                    onChange={e => setNewExam({...newExam, groupId: e.target.value})}
-                  >
-                    <option value="">Tanpa Kelompok</option>
-                    {groups.map(g => (
-                      <option key={g.id} value={g.id}>{g.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Judul Ujian</label>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Kode Masuk (Opsional)</label>
                   <input 
-                    required
                     type="text" 
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                    value={newExam.title}
-                    onChange={e => setNewExam({...newExam, title: e.target.value})}
+                    placeholder="Contoh: 123456"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={newExam.accessCode}
+                    onChange={e => setNewExam({...newExam, accessCode: e.target.value})}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-black text-gray-700 mb-1 uppercase tracking-wider">URL Embed Ujian</label>
-                  <input 
-                    required
-                    type="text" 
-                    placeholder="https://forms.office.com/..."
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
-                    value={newExam.url}
-                    onChange={e => setNewExam({...newExam, url: e.target.value})}
-                  />
-                  <p className="mt-1.5 text-[10px] font-bold text-indigo-600 leading-tight">
-                    <Info className="w-3 h-3 inline mr-1 mb-0.5" />
-                    Gunakan link "Sematkan" (Embed) agar tampilan lebih ringan, stabil, dan pas di layar HP siswa.
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Waktu Mulai</label>
-                    <input 
-                      required
-                      type="datetime-local" 
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                      value={newExam.startTime}
-                      onChange={e => setNewExam({...newExam, startTime: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Waktu Selesai</label>
-                    <input 
-                      required
-                      type="datetime-local" 
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                      value={newExam.endTime}
-                      onChange={e => setNewExam({...newExam, endTime: e.target.value})}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Kode Masuk</label>
-                    <input 
-                      required
-                      type="text" 
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                      value={newExam.accessCode}
-                      onChange={e => setNewExam({...newExam, accessCode: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Durasi Ujian (Menit)</label>
-                    <input 
-                      required
-                      type="number" 
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                      value={newExam.duration}
-                      onChange={e => setNewExam({...newExam, duration: parseInt(e.target.value)})}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Durasi Freeze (Detik)</label>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Durasi (Menit)</label>
                   <input 
                     required
                     type="number" 
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                    value={newExam.freezeDuration}
-                    onChange={e => setNewExam({...newExam, freezeDuration: parseInt(e.target.value)})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={newExam.duration}
+                    onChange={e => setNewExam({...newExam, duration: parseInt(e.target.value) || 60})}
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Kode Keluar (Opsional)</label>
-                  <input 
-                    type="text" 
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                    value={newExam.exitCode}
-                    onChange={e => setNewExam({...newExam, exitCode: e.target.value})}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Informasi Ujian</label>
-                  <textarea 
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none h-20 resize-none"
-                    placeholder="Contoh: Ujian Akhir Semester Ganjil"
-                    value={newExam.info}
-                    onChange={e => setNewExam({...newExam, info: e.target.value})}
-                  />
-                </div>
-                <div className="flex gap-3 pt-4">
-                  <button 
-                    type="button"
-                    onClick={closeModal}
-                    className="flex-1 py-2.5 border border-gray-300 rounded-xl font-semibold text-gray-700 hover:bg-gray-50 transition-all"
-                  >
-                    Batal
-                  </button>
-                  <button 
-                    type="submit"
-                    className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition-all"
-                  >
-                    {editingId ? 'Simpan Perubahan' : 'Buat Ujian'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Waktu Freeze / Hukum Kunci (Detik)</label>
+                <input 
+                  type="number" 
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={newExam.freezeDuration}
+                  onChange={e => setNewExam({...newExam, freezeDuration: parseInt(e.target.value) || 15})}
+                />
+                <p className="text-[10px] text-gray-400 mt-1">Lama layar siswa membeku saat terdeteksi membuka aplikasi/tab lain.</p>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button 
+                  type="button"
+                  onClick={closeModal}
+                  className="flex-1 py-2 border border-gray-300 rounded-xl text-xs font-bold text-gray-700"
+                >
+                  Batal
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 shadow-md shadow-indigo-100"
+                >
+                  {editingId ? 'Simpan Perubahan' : 'Buat Ujian'}
+                </button>
+              </div>
+            </form>
           </div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
+
+      {/* Delete Exam Confirm */}
+      {examToDelete && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center space-y-3">
+            <Trash2 className="w-10 h-10 text-red-600 mx-auto" />
+            <h3 className="font-black text-gray-900 text-base">Hapus Ujian?</h3>
+            <p className="text-xs text-gray-500">Ujian ini akan dihapus dari sistem.</p>
+            <div className="flex gap-2 pt-2">
+              <button 
+                onClick={() => setExamToDelete(null)}
+                className="flex-1 py-2 border border-gray-300 rounded-xl text-xs font-bold text-gray-700"
+              >
+                Batal
+              </button>
+              <button 
+                onClick={() => handleDelete(examToDelete)}
+                className="flex-1 py-2 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700"
+              >
+                Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Group Confirm */}
+      {isDeletingGroup && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center space-y-3">
+            <Trash2 className="w-10 h-10 text-red-600 mx-auto" />
+            <h3 className="font-black text-gray-900 text-base">Hapus Kelompok?</h3>
+            <p className="text-xs text-gray-500">Kelompok akan dihapus. Ujian di dalamnya tetap aman dan menjadi ujian umum.</p>
+            <div className="flex gap-2 pt-2">
+              <button 
+                onClick={() => setIsDeletingGroup(null)}
+                className="flex-1 py-2 border border-gray-300 rounded-xl text-xs font-bold text-gray-700"
+              >
+                Batal
+              </button>
+              <button 
+                onClick={() => handleDeleteGroup(isDeletingGroup)}
+                className="flex-1 py-2 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700"
+              >
+                Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Confirm */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center space-y-3">
+            <AlertTriangle className="w-10 h-10 text-red-600 mx-auto" />
+            <h3 className="font-black text-gray-900 text-base">Bersihkan Sesi Peserta?</h3>
+            <p className="text-xs text-gray-500">Semua riwayat pengerjaan siswa yang tersimpan akan dibersihkan untuk sesi baru.</p>
+            <div className="flex gap-2 pt-2">
+              <button 
+                onClick={() => setShowResetConfirm(false)}
+                className="flex-1 py-2 border border-gray-300 rounded-xl text-xs font-bold text-gray-700"
+              >
+                Batal
+              </button>
+              <button 
+                onClick={handleResetData}
+                className="flex-1 py-2 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700"
+              >
+                Bersihkan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
