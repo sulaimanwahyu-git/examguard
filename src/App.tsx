@@ -1747,20 +1747,24 @@ const ExamCard = memo(({ exam, status, onStart, viewMode }: { exam: Exam, status
         <motion.div 
           initial={{ opacity: 0, x: -10 }}
           animate={{ opacity: 1, x: 0 }}
-          className={`bg-white rounded-xl border border-gray-100 p-3 shadow-sm flex items-center justify-between gap-3 transition-all ${status !== 'active' ? 'opacity-75 grayscale-[0.5]' : ''}`}
+          whileTap={{ scale: 0.98 }}
+          onClick={() => onStart(exam.id)}
+          className="bg-white rounded-2xl border border-gray-200/80 p-4 shadow-sm hover:shadow-md flex items-center justify-between gap-3 transition-all cursor-pointer hover:border-indigo-200"
         >
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className={`p-2 rounded-lg shrink-0 ${status === 'active' ? 'bg-indigo-50 text-indigo-600' : 'bg-gray-50 text-gray-400'}`}>
+          <div className="flex items-center gap-3.5 flex-1 min-w-0">
+            <div className="p-2.5 rounded-xl shrink-0 bg-indigo-50 text-indigo-600">
               <BookOpen className="w-5 h-5" />
             </div>
             <div className="text-left min-w-0">
               <h3 className="text-sm font-black text-gray-900 leading-tight truncate">{exam.title}</h3>
-              <div className="flex items-center gap-3 mt-0.5">
-                <div className="flex items-center gap-1 text-[10px] font-bold text-gray-400">
-                  <Calendar className="w-3 h-3" />
-                  <span>{format(parseISO(exam.startTime), 'd MMM', { locale: localeId })}</span>
-                </div>
-                <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-500">
+              <div className="flex items-center gap-3 mt-1">
+                {exam.startTime && (
+                  <div className="flex items-center gap-1 text-[11px] font-bold text-gray-400">
+                    <Calendar className="w-3 h-3" />
+                    <span>{format(parseISO(exam.startTime), 'd MMM', { locale: localeId })}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1 text-[11px] font-bold text-indigo-500">
                   <Clock className="w-3 h-3" />
                   <span>{exam.duration || 60}m</span>
                 </div>
@@ -1769,18 +1773,16 @@ const ExamCard = memo(({ exam, status, onStart, viewMode }: { exam: Exam, status
           </div>
 
           <div className="shrink-0">
-            {status === 'active' ? (
-              <button 
-                onClick={() => onStart(exam.id)}
-                className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-black text-[10px] hover:bg-indigo-700 shadow-md shadow-indigo-50 transition-all"
-              >
-                MULAI
-              </button>
-            ) : (
-              <div className={`px-3 py-1 rounded-lg font-black text-[9px] text-center ${status === 'upcoming' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600'}`}>
-                {status === 'upcoming' ? 'NANTI' : 'SELESAI'}
-              </div>
-            )}
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                onStart(exam.id);
+              }}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-black text-xs hover:bg-indigo-700 shadow-md shadow-indigo-100 transition-all flex items-center gap-1.5"
+            >
+              <span>MULAI</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
           </div>
         </motion.div>
       );
@@ -1790,14 +1792,13 @@ const ExamCard = memo(({ exam, status, onStart, viewMode }: { exam: Exam, status
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -5 }}
-      className={`bg-white rounded-[2rem] border-4 border-gray-100 p-6 sm:p-8 shadow-xl transition-all relative overflow-hidden ${status !== 'active' ? 'opacity-75 grayscale-[0.5]' : ''}`}
+      whileHover={{ y: -4 }}
+      onClick={() => onStart(exam.id)}
+      className="bg-white rounded-[2rem] border-2 border-gray-100 p-6 sm:p-8 shadow-xl transition-all relative overflow-hidden cursor-pointer hover:border-indigo-300"
     >
-      {status === 'active' && (
-        <div className="absolute top-0 right-0 bg-green-500 text-white px-4 py-1 rounded-bl-2xl text-[10px] font-black uppercase tracking-widest animate-pulse">
-          Sedang Aktif
-        </div>
-      )}
+      <div className="absolute top-0 right-0 bg-emerald-500 text-white px-4 py-1 rounded-bl-2xl text-[10px] font-black uppercase tracking-widest">
+        Aktif
+      </div>
       
       <div className="mb-6">
         <h3 className="text-2xl font-black text-gray-900 leading-tight mb-2">{exam.title}</h3>
@@ -1808,40 +1809,29 @@ const ExamCard = memo(({ exam, status, onStart, viewMode }: { exam: Exam, status
       </div>
       
       <div className="space-y-4 mb-8">
-        <div className="bg-gray-50 rounded-2xl p-4 border-2 border-gray-100 space-y-3">
-          <div className="flex items-center gap-3 text-sm font-bold text-gray-700">
-            <Calendar className="w-5 h-5 text-indigo-500" />
-            <span>{format(parseISO(exam.startTime), 'EEEE, d MMMM yyyy', { locale: localeId })}</span>
-          </div>
-          <div className={`flex items-center gap-3 text-sm font-bold ${status === 'active' ? 'text-indigo-600' : 'text-gray-500'}`}>
+        <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 space-y-3">
+          {exam.startTime && (
+            <div className="flex items-center gap-3 text-sm font-bold text-gray-700">
+              <Calendar className="w-5 h-5 text-indigo-500" />
+              <span>{format(parseISO(exam.startTime), 'EEEE, d MMMM yyyy', { locale: localeId })}</span>
+            </div>
+          )}
+          <div className="flex items-center gap-3 text-sm font-bold text-indigo-600">
             <Clock className="w-5 h-5" />
             <span>{exam.duration || 60} Menit</span>
           </div>
         </div>
       </div>
 
-      {status === 'upcoming' && (
-        <div className="mb-6 p-3 bg-amber-50 border-2 border-amber-100 rounded-2xl text-center">
-          <p className="text-sm font-black text-amber-700">Ujian Belum Dimulai</p>
-        </div>
-      )}
-
-      {status === 'ended' && (
-        <div className="mb-6 p-3 bg-red-50 border-2 border-red-100 rounded-2xl text-center">
-          <p className="text-sm font-black text-red-700">Ujian Sudah Berakhir</p>
-        </div>
-      )}
-
       <button 
-        disabled={status !== 'active'}
-        onClick={() => onStart(exam.id)}
-        className={`w-full py-4 rounded-2xl font-black text-lg transition-all shadow-xl ${
-          status === 'active' 
-            ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200 hover:shadow-indigo-300' 
-            : 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
-        }`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onStart(exam.id);
+        }}
+        className="w-full py-4 rounded-2xl font-black text-lg transition-all shadow-xl bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200 flex items-center justify-center gap-2"
       >
-        {status === 'active' ? 'MULAI UJIAN' : status === 'upcoming' ? 'BELUM AKTIF' : 'SUDAH SELESAI'}
+        <span>MULAI UJIAN</span>
+        <ChevronRight className="w-5 h-5" />
       </button>
     </motion.div>
   );
@@ -1850,10 +1840,8 @@ const ExamCard = memo(({ exam, status, onStart, viewMode }: { exam: Exam, status
 const StudentHome = () => {
   const [exams, setExams] = useState<Exam[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<Group | { id: string, name: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [now, setNow] = useState(new Date());
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [currentQuote, setCurrentQuote] = useState('');
   const navigate = useNavigate();
 
@@ -1864,7 +1852,7 @@ const StudentHome = () => {
     setIsLoading(true);
     setCurrentQuote(ENCOURAGEMENT_QUOTES[Math.floor(Math.random() * ENCOURAGEMENT_QUOTES.length)]);
     
-    // Ensure student is authenticated anonymously to read/write data
+    // Ensure student is authenticated anonymously
     const ensureAuth = async () => {
       if (!auth.currentUser && !hasAttemptedAuth.current) {
         hasAttemptedAuth.current = true;
@@ -1885,7 +1873,7 @@ const StudentHome = () => {
     // Fallback timeout to prevent infinite loading
     const fallbackTimer = setTimeout(() => {
       setIsLoading(false);
-    }, 2500);
+    }, 2000);
 
     const qExams = query(collection(db, 'exams'), orderBy('createdAt', 'desc'));
     const unsubExams = onSnapshot(qExams, (snap) => {
@@ -1908,17 +1896,15 @@ const StudentHome = () => {
       setIsLoading(false);
     });
 
-    const timer = setInterval(() => setNow(new Date()), 30000);
     return () => {
       clearTimeout(fallbackTimer);
       unsubExams();
       unsubGroups();
-      clearInterval(timer);
     };
   }, []);
 
   useEffect(() => {
-    if (selectedGroup) {
+    if (selectedGroup && selectedGroup.id !== 'ungrouped') {
       const currentGroup = groups.find(g => g.id === selectedGroup.id);
       if (!currentGroup) {
         setSelectedGroup(null);
@@ -1926,23 +1912,15 @@ const StudentHome = () => {
     }
   }, [groups, selectedGroup]);
 
-  const filteredExams = selectedGroup 
-    ? exams.filter(ex => ex.groupId === selectedGroup.id)
-    : [];
+  const ungroupedExams = useMemo(() => {
+    return exams.filter(ex => !ex.groupId || !groups.some(g => g.id === ex.groupId));
+  }, [exams, groups]);
 
-  const getExamStatus = (exam: Exam) => {
-    try {
-      if (!exam.startTime || !exam.endTime) return 'upcoming';
-      const start = parseISO(exam.startTime);
-      const end = parseISO(exam.endTime);
-      if (isNaN(start.getTime()) || isNaN(end.getTime())) return 'upcoming';
-      if (now < start) return 'upcoming';
-      if (now > end) return 'ended';
-      return 'active';
-    } catch (e) {
-      return 'upcoming';
-    }
-  };
+  const filteredExams = useMemo(() => {
+    if (!selectedGroup) return [];
+    if (selectedGroup.id === 'ungrouped') return ungroupedExams;
+    return exams.filter(ex => ex.groupId === selectedGroup.id);
+  }, [selectedGroup, exams, ungroupedExams]);
 
   const groupColors = [
     'bg-indigo-500 hover:bg-indigo-600',
@@ -1953,126 +1931,156 @@ const StudentHome = () => {
     'bg-rose-500 hover:bg-rose-600',
   ];
 
-  return (
-    <div className="min-h-[calc(100vh-80px)] bg-[#F8FAFC] p-6">
-      <div className="max-w-7xl mx-auto">
-        <AnimatePresence mode="wait">
-          {!selectedGroup ? (
-            <motion.div 
-              key="groups"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="space-y-8"
-            >
-              <div className="text-center space-y-3 mb-8">
-                <div className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-1.5 rounded-full shadow-lg shadow-indigo-100">
-                  <Shield className="w-4 h-4" />
-                  <span className="font-black text-[10px] uppercase tracking-[0.2em]">Examguard - SPENDAPOL</span>
-                </div>
-                <div className="space-y-1">
-                  <h1 className="text-3xl font-black text-gray-900 tracking-tight">
-                    Halo, <span className="text-indigo-600">Pejuang Ujian!</span> 🔥
-                  </h1>
-                  <p className="text-gray-500 text-sm font-medium italic px-4">
-                    "{currentQuote}"
-                  </p>
-                </div>
-              </div>
+  // If no groups exist, show exams directly without extra screen
+  const hasNoGroups = groups.length === 0;
 
-              {authError && (
-                <div className="bg-red-50 border-2 border-red-200 p-6 rounded-[2rem] text-center space-y-3">
-                  <AlertTriangle className="w-12 h-12 text-red-500 mx-auto" />
-                  <h3 className="text-xl font-bold text-red-900">Kesalahan Konfigurasi</h3>
-                  <p className="text-red-700 font-medium">{authError}</p>
-                  <div className="pt-2">
+  return (
+    <div className="min-h-[calc(100vh-80px)] bg-[#F8FAFC] p-4 sm:p-6">
+      <div className="max-w-4xl mx-auto">
+        <div className="text-center space-y-2.5 mb-6 sm:mb-8">
+          <div className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-1.5 rounded-full shadow-md shadow-indigo-100">
+            <Shield className="w-4 h-4" />
+            <span className="font-black text-[10px] uppercase tracking-[0.2em]">Examguard - SPENDAPOL</span>
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
+              Halo, <span className="text-indigo-600">Pejuang Ujian!</span> 🔥
+            </h1>
+            <p className="text-gray-500 text-xs sm:text-sm font-medium italic px-4">
+              "{currentQuote}"
+            </p>
+          </div>
+        </div>
+
+        {authError && (
+          <div className="bg-red-50 border border-red-200 p-4 rounded-2xl text-center space-y-2 mb-6">
+            <AlertTriangle className="w-8 h-8 text-red-500 mx-auto" />
+            <p className="text-red-700 text-sm font-medium">{authError}</p>
+          </div>
+        )}
+
+        <AnimatePresence mode="wait">
+          {hasNoGroups || selectedGroup ? (
+            <motion.div 
+              key="exams-view"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-4"
+            >
+              {!hasNoGroups && selectedGroup && (
+                <div className="flex items-center justify-between gap-4 bg-white p-3.5 rounded-2xl shadow-sm border border-gray-100 mb-4">
+                  <div className="flex items-center gap-3">
                     <button 
-                      onClick={() => window.location.reload()}
-                      className="bg-red-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100"
+                      onClick={() => setSelectedGroup(null)}
+                      className="p-2 hover:bg-gray-100 rounded-xl transition-all text-indigo-600 flex items-center gap-1 font-bold text-xs"
                     >
-                      Coba Lagi
+                      <ChevronLeft className="w-5 h-5" />
+                      <span>Kembali</span>
                     </button>
+                    <div>
+                      <h2 className="text-base font-black text-gray-900 uppercase tracking-tight leading-none">{selectedGroup.name}</h2>
+                    </div>
+                  </div>
+                  <div className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg font-black text-[10px]">
+                    {filteredExams.length} Ujian
                   </div>
                 </div>
               )}
 
               <div className="flex flex-col gap-3">
-                {groups.map((group, index) => (
-                  <motion.button
-                    key={group.id}
-                    whileHover={{ x: 4 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => setSelectedGroup(group)}
-                    className={`${groupColors[index % groupColors.length]} p-4 rounded-2xl text-white shadow-md flex items-center justify-between gap-3 transition-all border-2 border-white/20`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="bg-white/20 p-2 rounded-lg backdrop-blur-sm">
-                        <BookOpen className="w-5 h-5 text-white" />
-                      </div>
-                      <div className="text-left">
-                        <h3 className="text-base font-black uppercase tracking-wide">{group.name}</h3>
-                        <p className="text-white/80 font-bold text-[10px]">
-                          {exams.filter(e => e.groupId === group.id).length} Ujian
-                        </p>
-                      </div>
-                    </div>
-                    <div className="bg-white text-gray-900 px-3 py-1 rounded-lg font-black text-[10px] shadow-sm">
-                      PILIH
-                    </div>
-                  </motion.button>
+                {(hasNoGroups ? exams : filteredExams).map(exam => (
+                  <ExamCard 
+                    key={exam.id} 
+                    exam={exam} 
+                    status="active"
+                    onStart={(id) => navigate(`/exam/${id}`)} 
+                    viewMode="list"
+                  />
                 ))}
-                {groups.length === 0 && !isLoading && (
-                  <div className="col-span-full py-20 text-center bg-white rounded-[2rem] border-4 border-dashed border-gray-200">
-                    <p className="text-gray-400 font-bold text-xl">Belum ada kelompok ujian aktif.</p>
+
+                {(hasNoGroups ? exams : filteredExams).length === 0 && !isLoading && (
+                  <div className="py-16 text-center bg-white rounded-3xl border-2 border-dashed border-gray-200 p-6">
+                    <p className="text-gray-400 font-bold text-base">Belum ada ujian aktif yang tersedia.</p>
+                    <p className="text-gray-400 text-xs mt-1">Silakan hubungi bapak/ibu guru pengawas jika ujian belum muncul.</p>
                   </div>
                 )}
+
                 {isLoading && (
-                  <div className="col-span-full py-20 text-center">
-                    <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-                    <p className="text-gray-500 font-bold">Memuat data...</p>
+                  <div className="py-16 text-center">
+                    <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                    <p className="text-gray-500 font-bold text-sm">Memuat daftar ujian...</p>
                   </div>
                 )}
               </div>
             </motion.div>
           ) : (
             <motion.div 
-              key="exams"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="space-y-8"
+              key="groups-view"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-4"
             >
-              <div className="flex items-center justify-between gap-4 bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-6">
-                <div className="flex items-center gap-3">
-                  <button 
-                    onClick={() => setSelectedGroup(null)}
-                    className="p-2 hover:bg-gray-100 rounded-xl transition-all text-indigo-600"
-                  >
-                    <ChevronLeft className="w-6 h-6" />
-                  </button>
-                  <div>
-                    <h2 className="text-lg font-black text-gray-900 uppercase tracking-tight leading-none">{selectedGroup.name}</h2>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase mt-1">Daftar Ujian Aktif</p>
-                  </div>
-                </div>
-                <div className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg font-black text-[10px]">
-                  {filteredExams.length} TOTAL
-                </div>
-              </div>
-
               <div className="flex flex-col gap-3">
-                {filteredExams.map(exam => (
-                  <ExamCard 
-                    key={exam.id} 
-                    exam={exam} 
-                    status={getExamStatus(exam)} 
-                    onStart={(id) => navigate(`/exam/${id}`)} 
-                    viewMode="list"
-                  />
-                ))}
-                {filteredExams.length === 0 && (
-                  <div className="col-span-full py-20 text-center bg-white rounded-[2rem] border-4 border-dashed border-gray-200">
-                    <p className="text-gray-400 font-bold text-xl">Tidak ada ujian di kelompok ini.</p>
+                {groups.map((group, index) => {
+                  const examCount = exams.filter(e => e.groupId === group.id).length;
+                  return (
+                    <motion.button
+                      key={group.id}
+                      whileHover={{ x: 3 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setSelectedGroup(group)}
+                      className={`${groupColors[index % groupColors.length]} p-4 rounded-2xl text-white shadow-md flex items-center justify-between gap-3 transition-all border-2 border-white/20`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="bg-white/20 p-2 rounded-xl backdrop-blur-sm">
+                          <BookOpen className="w-5 h-5 text-white" />
+                        </div>
+                        <div className="text-left">
+                          <h3 className="text-base font-black uppercase tracking-wide">{group.name}</h3>
+                          <p className="text-white/80 font-bold text-[10px]">
+                            {examCount} Ujian Aktif
+                          </p>
+                        </div>
+                      </div>
+                      <div className="bg-white text-gray-900 px-3.5 py-1.5 rounded-xl font-black text-xs shadow-sm flex items-center gap-1">
+                        <span>PILIH</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </div>
+                    </motion.button>
+                  );
+                })}
+
+                {ungroupedExams.length > 0 && (
+                  <motion.button
+                    whileHover={{ x: 3 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setSelectedGroup({ id: 'ungrouped', name: 'Ujian Umum / Lainnya' })}
+                    className="bg-slate-700 hover:bg-slate-800 p-4 rounded-2xl text-white shadow-md flex items-center justify-between gap-3 transition-all border-2 border-white/20"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="bg-white/20 p-2 rounded-xl backdrop-blur-sm">
+                        <BookOpen className="w-5 h-5 text-white" />
+                      </div>
+                      <div className="text-left">
+                        <h3 className="text-base font-black uppercase tracking-wide">Ujian Umum / Lainnya</h3>
+                        <p className="text-white/80 font-bold text-[10px]">
+                          {ungroupedExams.length} Ujian Aktif
+                        </p>
+                      </div>
+                    </div>
+                    <div className="bg-white text-gray-900 px-3.5 py-1.5 rounded-xl font-black text-xs shadow-sm flex items-center gap-1">
+                      <span>PILIH</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </div>
+                  </motion.button>
+                )}
+
+                {isLoading && (
+                  <div className="py-16 text-center">
+                    <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                    <p className="text-gray-500 font-bold text-sm">Memuat data...</p>
                   </div>
                 )}
               </div>
@@ -2080,19 +2088,14 @@ const StudentHome = () => {
           )}
         </AnimatePresence>
 
-        <div className="mt-16 text-center space-y-6">
+        <div className="mt-12 text-center">
           <button 
             onClick={() => navigate('/admin')}
-            className="text-sm font-bold text-gray-400 hover:text-indigo-600 transition-all bg-white px-6 py-2 rounded-full border border-gray-200 shadow-sm"
+            className="text-xs font-bold text-gray-400 hover:text-indigo-600 transition-all uppercase tracking-widest inline-flex items-center gap-1.5 py-2 px-4 rounded-xl hover:bg-gray-100"
           >
-            Akses Panel Admin
+            <Lock className="w-3.5 h-3.5" />
+            <span>Akses Ruang Pengawas (Admin)</span>
           </button>
-          
-          <footer className="pt-8 border-t border-gray-100">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-              Tim Kurikulum SMPN 2 Gempol @2026
-            </p>
-          </footer>
         </div>
       </div>
     </div>
@@ -2491,6 +2494,7 @@ const ExamPlayer = () => {
     
     if (!exam) {
       setIsStarting(false);
+      setPlayerError("Data ujian belum siap. Silakan muat ulang halaman.");
       return;
     }
 
@@ -2499,41 +2503,34 @@ const ExamPlayer = () => {
     const cleanAbsen = studentAbsen.trim().toUpperCase();
 
     if (!cleanName) {
-      setPlayerError("Masukkan nama lengkap Anda.");
+      setPlayerError("Silakan masukkan Nama Lengkap Anda.");
       setIsStarting(false);
       return;
     }
 
     if (!cleanClass) {
-      setPlayerError("Masukkan kelas Anda.");
+      setPlayerError("Silakan masukkan Kelas Anda (contoh: 7A).");
       setIsStarting(false);
       return;
     }
 
     if (!cleanAbsen) {
-      setPlayerError("Masukkan nomor absen Anda.");
+      setPlayerError("Silakan masukkan Nomor Absen Anda.");
       setIsStarting(false);
       return;
     }
     
-    const now = new Date();
-    const start = parseISO(exam.startTime);
-    const end = parseISO(exam.endTime);
-    
-    if (!isWithinInterval(now, { start, end })) {
-      setPlayerError("Ujian saat ini tidak aktif.");
-      setIsStarting(false);
-      return;
-    }
-
-    if (code !== exam.accessCode) {
-      setPlayerError("Kode masuk tidak valid.");
+    // Check access code if required by teacher
+    const requiredCode = (exam.accessCode || '').trim();
+    const enteredCode = (code || '').trim();
+    if (requiredCode && enteredCode.toUpperCase() !== requiredCode.toUpperCase()) {
+      setPlayerError("Kode Masuk salah! Periksa kembali kode akses dari pengawas.");
       setIsStarting(false);
       return;
     }
 
     try {
-      // Fullscreen handling IMMEDIATELY after user gesture
+      // 1. Fullscreen handling immediately on user gesture
       const target = document.documentElement;
       try {
         if (target.requestFullscreen) {
@@ -2542,56 +2539,49 @@ const ExamPlayer = () => {
           (target as any).webkitRequestFullscreen();
         }
       } catch (fsErr) {
-        console.warn("Initial fullscreen failed:", fsErr);
+        console.warn("Initial fullscreen error:", fsErr);
       }
 
-      // Initialize AudioContext on user gesture for iOS
-      const AudioCtxClass = (window as any).AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtxClass) {
-        const ctx = new AudioCtxClass();
-        setAudioContext(ctx);
-      }
-
-      // Ensure auth without blocking if anonymous auth is restricted
-      if (!auth.currentUser) {
-        try {
-          const authPromise = signInAnonymously(auth);
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Auth timeout")), 4000));
-          await Promise.race([authPromise, timeoutPromise]);
-        } catch (authErr: any) {
-          console.warn("Anonymous auth failed/disabled, continuing:", authErr);
+      // 2. Audio context initialization for warning tones
+      try {
+        const AudioCtxClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtxClass) {
+          const ctx = new AudioCtxClass();
+          setAudioContext(ctx);
         }
-      }
+      } catch (e) {}
 
       const startTimeStr = new Date().toISOString();
-      
-      // Deterministic Session ID with safe alphanumeric string
       const safeName = cleanName.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
       const safeClass = cleanClass.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20);
       const safeAbsen = cleanAbsen.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 10);
       const deterministicSessionId = `SSN_${id}_${safeName}_${safeClass}_${safeAbsen}`;
-      
-      const sessionRef = doc(db, 'exam_sessions', deterministicSessionId);
-      
-      try {
-        const sessionSnap = await getDoc(sessionRef);
-        
-        if (sessionSnap.exists()) {
-          const docData = sessionSnap.data();
-          if (docData.status === 'finished') {
-            setPlayerError("Anda sudah menyelesaikan ujian ini.");
-            setIsStarting(false);
-            return;
+
+      // Save for instant local recovery
+      localStorage.setItem(`session_${id}`, JSON.stringify({
+        id: deterministicSessionId,
+        name: cleanName,
+        class: cleanClass,
+        absen: cleanAbsen,
+        startTime: startTimeStr
+      }));
+
+      // 3. ENTER EXAM IMMEDIATELY (Zero Lag!)
+      setSessionId(deterministicSessionId);
+      setSessionStartTime(startTimeStr);
+      setLastActionTime(Date.now());
+      setIsStarted(true);
+      setIsFrozen(false);
+      setIsLocked(false);
+      setFreezeTimeLeft(0);
+
+      // 4. Background non-blocking sync to Firestore
+      (async () => {
+        try {
+          if (!auth.currentUser) {
+            await signInAnonymously(auth).catch(() => {});
           }
-          
-          // Resume existing session
-          await updateDoc(sessionRef, {
-            lastActive: startTimeStr,
-            status: 'active'
-          });
-          setViolationCount(docData.violationCount || 0);
-        } else {
-          // Create new session with deterministic ID
+          const sessionRef = doc(db, 'exam_sessions', deterministicSessionId);
           await setDoc(sessionRef, {
             examId: id,
             studentName: cleanName,
@@ -2601,32 +2591,15 @@ const ExamPlayer = () => {
             status: 'active',
             lastActive: startTimeStr,
             violationCount: 0
-          });
-          setViolationCount(0);
+          }, { merge: true });
+        } catch (dbErr) {
+          console.warn("Background session sync warning:", dbErr);
         }
-      } catch (dbErr) {
-        console.warn("Firestore session start warning (proceeding):", dbErr);
-      }
-      
-      // Save for recovery
-      localStorage.setItem(`session_${id}`, JSON.stringify({
-        id: deterministicSessionId,
-        name: cleanName,
-        class: cleanClass,
-        absen: cleanAbsen,
-        startTime: startTimeStr
-      }));
+      })();
 
-      setSessionId(deterministicSessionId);
-      setSessionStartTime(startTimeStr);
-      setLastActionTime(Date.now());
-      setIsStarted(true);
-      setIsFrozen(false);
-      setIsLocked(false);
-      setFreezeTimeLeft(0);
     } catch (err: any) {
       console.error("Critical Start Error:", err);
-      setPlayerError("Gagal memulai ujian. Silakan coba lagi.");
+      setPlayerError("Terjadi kendala saat memulai ujian. Silakan coba lagi.");
     } finally {
       setIsStarting(false);
     }
@@ -2816,6 +2789,13 @@ const ExamPlayer = () => {
           </div>
           
           <div className="space-y-4">
+            {playerError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-2.5 text-xs font-bold animate-pulse">
+                <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+                <span>{playerError}</span>
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Nama Lengkap</label>
               <div className="relative">
